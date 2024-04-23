@@ -7,7 +7,7 @@ from typing import Tuple
 import argbind
 import numpy as np
 import tqdm
-from audiotools import util
+from audiotools.core import util
 
 
 @argbind.bind()

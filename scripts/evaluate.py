@@ -5,20 +5,22 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import argbind
-import torch
 from audiotools import AudioSignal
 from audiotools import metrics
 from audiotools.core import util
 from audiotools.ml.decorators import Tracker
-from train import losses
+import jax.numpy as jnp
+import numpy as np
+
+from dac_jax.nn.loss import multiscale_stft_loss, mel_spectrogram_loss, sisdr_loss, l1_loss
 
 
 @dataclass
 class State:
-    stft_loss: losses.MultiScaleSTFTLoss
-    mel_loss: losses.MelSpectrogramLoss
-    waveform_loss: losses.L1Loss
-    sisdr_loss: losses.SISDRLoss
+    stft_loss: multiscale_stft_loss
+    mel_loss: mel_spectrogram_loss
+    waveform_loss: l1_loss
+    sisdr_loss: sisdr_loss
 
 
 def get_metrics(signal_path, recons_path, state):
@@ -45,7 +47,6 @@ def get_metrics(signal_path, recons_path, state):
 
 
 @argbind.bind(without_prefix=True)
-@torch.no_grad()
 def evaluate(
     input: str = "samples/input",
     output: str = "samples/output",
@@ -53,15 +54,10 @@ def evaluate(
 ):
     tracker = Tracker()
 
-    waveform_loss = losses.L1Loss()
-    stft_loss = losses.MultiScaleSTFTLoss()
-    mel_loss = losses.MelSpectrogramLoss()
-    sisdr_loss = losses.SISDRLoss()
-
     state = State(
-        waveform_loss=waveform_loss,
-        stft_loss=stft_loss,
-        mel_loss=mel_loss,
+        waveform_loss=l1_loss,
+        stft_loss=multiscale_stft_loss,
+        mel_loss=mel_spectrogram_loss,
         sisdr_loss=sisdr_loss,
     )
 
@@ -73,8 +69,8 @@ def evaluate(
     def record(future, writer):
         o = future.result()
         for k, v in o.items():
-            if torch.is_tensor(v):
-                o[k] = v.item()
+            if isinstance(v, jnp.ndarray):  # todo:
+                o[k] = np.array(v).item()  # todo:
         writer.writerow(o)
         o.pop("path")
         return o

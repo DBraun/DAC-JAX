@@ -2,11 +2,11 @@ import sys
 
 import argbind
 
-from dac.utils import download
-from dac.utils.decode import decode
-from dac.utils.encode import encode
+from dac_jax.utils import download_model
+from dac_jax.utils.decode import decode
+from dac_jax.utils.encode import encode
 
-STAGES = ["encode", "decode", "download"]
+STAGES = ["encode", "decode", "download_model"]
 
 
 def run(stage: str):
@@ -20,10 +20,6 @@ def run(stage: str):
     if stage not in STAGES:
         raise ValueError(f"Unknown command: {stage}. Allowed commands are {STAGES}")
     stage_fn = globals()[stage]
-
-    if stage == "download":
-        stage_fn()
-        return
 
     stage_fn()
 

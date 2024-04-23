@@ -1,47 +1,53 @@
 import argbind
-import audiotools as at
+import jax
+from audiotools import AudioSignal
 import numpy as np
-import torch
 import tqdm
 
-import dac
+from dac_jax import load_model
+from dac_jax.audio_utils import find_audio
 
 
 @argbind.bind(without_prefix=True, positional=True)
 def main(
     folder: str,
     model_path: str,
+    metadata_path: str,
     n_samples: int = 1024,
-    device: str = "cuda",
 ):
-    files = at.util.find_audio(folder)[:n_samples]
+    files = find_audio(folder)[:n_samples]
+    key = jax.random.key(0)
+    key, subkey = jax.random.split(key)
     signals = [
-        at.AudioSignal.salient_excerpt(f, loudness_cutoff=-20, duration=1.0)
+        AudioSignal.salient_excerpt(f, subkey, loudness_cutoff=-20, duration=1.0)
         for f in files
     ]
 
-    with torch.no_grad():
-        model = dac.model.DAC.load(model_path).to(device)
-        model.eval()
+    assert model_path is not None
+    assert metadata_path is not None
 
-        codes = []
-        for x in tqdm.tqdm(signals):
-            x = x.to(model.device)
-            o = model.encode(x.audio_data, x.sample_rate)
-            codes.append(o["codes"].cpu())
+    model, variables = load_model(load_path=model_path, metadata_path=metadata_path)
+    model = model.bind(variables)
 
-        codes = torch.cat(codes, dim=-1)
-        entropy = []
+    codes = []
+    for x in tqdm.tqdm(signals):
+        x = jax.device_put(x, model.device)
+        o = model.encode(x.audio_data, x.sample_rate)
+        codes.append(np.array(o["codes"]))
 
-        for i in range(codes.shape[1]):
-            codes_ = codes[0, i, :]
-            counts = torch.bincount(codes_)
-            counts = (counts / counts.sum()).clamp(1e-10)
-            entropy.append(-(counts * counts.log()).sum().item() * np.log2(np.e))
+    codes = np.concatenate(codes, axis=-1)
+    entropy = []
 
-        pct = sum(entropy) / (10 * len(entropy))
-        print(f"Entropy for each codebook: {entropy}")
-        print(f"Effective percentage: {pct * 100}%")
+    for i in range(codes.shape[1]):
+        codes_ = codes[0, i, :]
+        counts = np.bincount(codes_)
+        counts = (counts / counts.sum())
+        counts = np.maximum(counts, 1e-10)
+        entropy.append(-(counts * np.log(counts)).sum().item() * np.log2(np.e))
+
+    pct = sum(entropy) / (10 * len(entropy))
+    print(f"Entropy for each codebook: {entropy}")
+    print(f"Effective percentage: {pct * 100}%")
 
 
 if __name__ == "__main__":

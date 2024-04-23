@@ -7,38 +7,37 @@ from pathlib import Path
 import argbind
 import numpy as np
 import pytest
-import torch
-from audiotools import AudioSignal
+import soundfile
 
-from dac.__main__ import run
+from dac_jax.__main__ import run
 
 
 def setup_module(module):
-    data_dir = Path(__file__).parent / "assets"
+    data_dir = Path(__file__).parent / "tmp_assets"
     data_dir.mkdir(exist_ok=True, parents=True)
     input_dir = data_dir / "input"
     input_dir.mkdir(exist_ok=True, parents=True)
 
     for i in range(5):
-        signal = AudioSignal(np.random.randn(1000), 44_100)
-        signal.write(input_dir / f"sample_{i}.wav")
+        sample_rate = 44_100
+        signal = np.random.randn(1000, sample_rate)
+        soundfile.write(input_dir / f'sample_{i}.wav', signal, samplerate=sample_rate)
     return input_dir
 
 
 def teardown_module(module):
     repo_root = Path(__file__).parent.parent
-    subprocess.check_output(["rm", "-rf", f"{repo_root}/tests/assets"])
+    subprocess.check_output(["rm", "-rf", f"{repo_root}/tests/tmp_assets"])
 
 
 @pytest.mark.parametrize("model_type", ["44khz", "24khz", "16khz"])
 def test_reconstruction(model_type):
     # Test encoding
-    input_dir = Path(__file__).parent / "assets" / "input"
+    input_dir = Path(__file__).parent / "tmp_assets" / "input"
     output_dir = input_dir.parent / model_type / "encoded_output"
     args = {
         "input": str(input_dir),
         "output": str(output_dir),
-        "device": "cuda" if torch.cuda.is_available() else "cpu",
         "model_type": model_type,
     }
     with argbind.scope(args):
@@ -58,24 +57,24 @@ def test_reconstruction(model_type):
 
 def test_compression():
     # Test encoding
-    input_dir = Path(__file__).parent / "assets" / "input"
+    input_dir = Path(__file__).parent / "tmp_assets" / "input"
     output_dir = input_dir.parent / "encoded_output_quantizers"
     args = {
         "input": str(input_dir),
         "output": str(output_dir),
         "n_quantizers": 3,
-        "device": "cuda" if torch.cuda.is_available() else "cpu",
     }
     with argbind.scope(args):
         run("encode")
 
     # Open .dac file
     dac_file = output_dir / "sample_0.dac"
-    artifacts = np.load(dac_file, allow_pickle=True)[()]
+    allow_pickle = True  # todo:
+    artifacts = np.load(dac_file, allow_pickle=allow_pickle)[()]
     codes = artifacts["codes"]
 
     # Ensure that the number of quantizers is correct
-    assert codes.shape[1] == 3
+    assert codes.shape[2] == 3
 
     # Ensure that dtype of compression is uint16
     assert codes.dtype == np.uint16

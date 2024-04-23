@@ -3,26 +3,23 @@ from pathlib import Path
 
 import argbind
 import torch
-from audiotools.core import util
 from audiotools.ml.decorators import Tracker
-from train import Accelerator
 
 import scripts.train as train
 
 
 @torch.no_grad()
-def process(batch, accel, test_data):
-    batch = util.prepare_batch(batch, accel.device)
+def process(batch, test_data):
     signal = test_data.transform(batch["signal"].clone(), **batch["transform_args"])
     return signal.cpu()
 
 
 @argbind.bind(without_prefix=True)
 @torch.no_grad()
-def save_test_set(args, accel, sample_rate: int = 44100, output: str = "samples/input"):
+def save_test_set(args, sample_rate: int = 44100, output: str = "samples/input"):
     tracker = Tracker()
     with argbind.scope(args, "test"):
-        test_data = train.build_dataset(sample_rate)
+        test_data = train.create_dataset(sample_rate=sample_rate)
 
     global process
     process = tracker.track("process", len(test_data))(process)
@@ -37,7 +34,7 @@ def save_test_set(args, accel, sample_rate: int = 44100, output: str = "samples/
 
         with tracker.live:
             for i in range(len(test_data)):
-                signal = process(test_data[i], accel, test_data)
+                signal = process(test_data[i], test_data)
                 input_path = output.parent / "input" / f"sample_{i}.wav"
                 metadata = {
                     "path": str(input_path),
@@ -51,5 +48,4 @@ def save_test_set(args, accel, sample_rate: int = 44100, output: str = "samples/
 if __name__ == "__main__":
     args = argbind.parse_args()
     with argbind.scope(args):
-        with Accelerator() as accel:
-            save_test_set(args, accel)
+        save_test_set(args)

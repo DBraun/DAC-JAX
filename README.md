@@ -1,189 +1,211 @@
-# Descript Audio Codec (.dac): High-Fidelity Audio Compression with Improved RVQGAN
+# DAC-JAX
 
-This repository contains training and inference scripts
-for the Descript Audio Codec (.dac), a high fidelity general
-neural audio codec, introduced in the paper titled **High-Fidelity Audio Compression with Improved RVQGAN**.
+[Descript Audio Codec](https://github.com/descriptinc/descript-audio-codec) (.dac) is a high-fidelity general neural audio codec introduced in the paper  
+"[High-Fidelity Audio Compression with Improved RVQGAN](https://arxiv.org/abs/2306.06546)".
 
-![](https://static.arxiv.org/static/browse/0.3.4/images/icons/favicon-16x16.png) [arXiv Paper: High-Fidelity Audio Compression with Improved RVQGAN
-](http://arxiv.org/abs/2306.06546) <br>
-📈 [Demo Site](https://descript.notion.site/Descript-Audio-Codec-11389fce0ce2419891d6591a68f814d5)<br>
-⚙ [Model Weights](https://github.com/descriptinc/descript-audio-codec/releases/download/0.0.1/weights.pth)
+This repository is an **unofficial** JAX implementation of the PyTorch-based DAC and has no affiliation with Descript.
 
-👉 With Descript Audio Codec, you can compress **44.1 KHz audio** into discrete codes at a **low 8 kbps bitrate**.  <br>
-🤌 That's approximately **90x compression** while maintaining exceptional fidelity and minimizing artifacts.  <br>
-💪 Our universal model works on all domains (speech, environment, music, etc.), making it widely applicable to generative modeling of all audio.  <br>
-👌 It can be used as a drop-in replacement for EnCodec for all audio language modeling applications (such as AudioLMs, MusicLMs, MusicGen, etc.) <br>
-
-<p align="center">
-<img src="./assets/comparsion_stats.png" alt="Comparison of compressions approaches. Our model achieves a higher compression factor compared to all baseline methods. Our model has a ~90x compression factor compared to 32x compression factor of EnCodec and 64x of SoundStream. Note that we operate at a target bitrate of 8 kbps, whereas EnCodec operates at 24 kbps and SoundStream at 6 kbps. We also operate at 44.1 kHz, whereas EnCodec operates at 48 kHz and SoundStream operates at 24 kHz." width=35%></p>
-
+You can read the DAC-JAX paper [here](https://drive.google.com/file/d/1HOzbxd6hWgKF2vynSv306-L30S7l7VYK/view?usp=sharing) (it will be on arXiv soon).
 
 ## Usage
 
 ### Installation
-```
-pip install descript-audio-codec
-```
-OR
 
-```
-pip install git+https://github.com/descriptinc/descript-audio-codec
-```
+1. Install the **CPU** version of [PyTorch](https://pytorch.org/). We strongly suggest the CPU version because trying to install a GPU version can conflict with JAX's CUDA-related installation.
+
+2. Install `audiotools` with no dependencies, since we want to avoid PyTorch again.
+    ```bash
+    pip install --no-dependencies descript-audiotools
+    ```
+
+3. Install [JAX](https://jax.readthedocs.io/en/latest/installation.html) (with GPU support).
+
+4. Install DAC-JAX with one of the following:
+
+    <!-- ```
+    python -m pip install dac-jax
+    ```
+    OR -->
+    
+    ```
+    pip install git+https://github.com/DBraun/DAC-JAX
+    ```
+    
+    Or,
+    
+    ```bash
+    python -m pip install .
+    ```
+    
+    Or, if you intend to contribute, clone and do an [editable install](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs):
+    ```bash
+    python -m pip install -e ".[dev]" .
+    ```
 
 ### Weights
-Weights are released as part of this repo under MIT license.
-We release weights for models that can natively support 16 kHz, 24kHz, and 44.1kHz sampling rates.
-Weights are automatically downloaded when you first run `encode` or `decode` command. You can cache them using one of the following commands
+The original Descript repository releases model weights under the MIT license. These weights are for models that natively support 16 kHz, 24kHz, and 44.1kHz sampling rates. Our scripts download these PyTorch weights and load them into JAX.
+Weights are automatically downloaded when you first run an `encode` or `decode` command. You can download them in advance with one of the following commands:
 ```bash
-python3 -m dac download # downloads the default 44kHz variant
-python3 -m dac download --model_type 44khz # downloads the 44kHz variant
-python3 -m dac download --model_type 24khz # downloads the 24kHz variant
-python3 -m dac download --model_type 16khz # downloads the 16kHz variant
+python -m dac_jax download # downloads the default 44kHz variant
+python -m dac_jax download --model_type 44khz --model_bitrate 16kbps # downloads the 44kHz 16 kbps variant
+python -m dac_jax download --model_type 44khz # downloads the 44kHz variant
+python -m dac_jax download --model_type 24khz # downloads the 24kHz variant
+python -m dac_jax download --model_type 16khz # downloads the 16kHz variant
 ```
-We provide a Dockerfile that installs all required dependencies for encoding and decoding. The build process caches the default model weights inside the image. This allows the image to be used without an internet connection. [Please refer to instructions below.](#docker-image)
 
+The default download location is `~/.cache/dac_jax`. You can change the location by setting an **absolute path** value for an environment variable `DAC_JAX_CACHE`. For example, on macOS/Linux:
+```bash
+export DAC_JAX_CACHE=/Users/admin/my-project/dac_jax_models
+```
+
+If you do this, remember to still have `DAC_JAX_CACHE` set before you use the `load_model` function.
 
 ### Compress audio
 ```
-python3 -m dac encode /path/to/input --output /path/to/output/codes
+python -m dac_jax encode /path/to/input --output /path/to/output/codes
 ```
 
 This command will create `.dac` files with the same name as the input files.
 It will also preserve the directory structure relative to input root and
-re-create it in the output directory. Please use `python -m dac encode --help`
+re-create it in the output directory. Please use `python -m dac_jax encode --help`
 for more options.
 
 ### Reconstruct audio from compressed codes
 ```
-python3 -m dac decode /path/to/output/codes --output /path/to/reconstructed_input
+python -m dac_jax decode /path/to/output/codes --output /path/to/reconstructed_input
 ```
 
 This command will create `.wav` files with the same name as the input files.
 It will also preserve the directory structure relative to input root and
-re-create it in the output directory. Please use `python -m dac decode --help`
+re-create it in the output directory. Please use `python -m dac_jax decode --help`
 for more options.
 
-### Programmatic Usage
-```py
-import dac
-from audiotools import AudioSignal
+### Programmatic usage
 
-# Download a model
-model_path = dac.utils.download(model_type="44khz")
-model = dac.DAC.load(model_path)
+Here we use DAC-JAX as a "[bound](https://flax.readthedocs.io/en/latest/developer_notes/module_lifecycle.html#bind)" module, freeing us from repeatedly passing variables as an argument and using `.apply`. Note that bound modules are not meant to be used in fine-tuning.
 
-model.to('cuda')
+```python
+import dac_jax
+from dac_jax.audio_utils import volume_norm, db2linear
 
-# Load audio signal file
-signal = AudioSignal('input.wav')
+import jax.numpy as jnp
+import librosa
 
-# Encode audio signal as one long file
-# (may run out of GPU memory on long files)
-signal.to(model.device)
+# Download a model and bind variables to it.
+model, variables = dac_jax.load_model(model_type="44khz")
+model = model.bind(variables)
 
-x = model.preprocess(signal.audio_data, signal.sample_rate)
-z, codes, latents, _, _ = model.encode(x)
+# Load a mono audio file
+signal, sample_rate = librosa.load('input.wav', sr=44100, mono=True, duration=.5)
+
+signal = jnp.array(signal, dtype=jnp.float32)
+while signal.ndim < 3:
+    signal = jnp.expand_dims(signal, axis=0)
+
+target_db = -16  # Normalize audio to -16 dB
+x, input_db = volume_norm(signal, target_db, sample_rate)
+
+# Encode audio signal as one long file (may run out of GPU memory on long files)
+x = model.preprocess(x, sample_rate)
+z, codes, latents, commitment_loss, codebook_loss = model.encode(x, train=False)
 
 # Decode audio signal
-y = model.decode(z)
+y = model.decode(z, length=signal.shape[-1])
 
-# Alternatively, use the `compress` and `decompress` functions
-# to compress long files.
+# Undo previous loudness normalization
+y = y * db2linear(input_db - target_db)
 
-signal = signal.cpu()
-x = model.compress(signal)
-
-# Save and load to and from disk
-x.save("compressed.dac")
-x = dac.DACFile.load("compressed.dac")
-
-# Decompress it back to an AudioSignal
-y = model.decompress(x)
-
-# Write to file
-y.write('output.wav')
+# Calculate mean-square error of reconstruction in time-domain
+mse = jnp.square(y-signal).mean()
 ```
 
-### Docker image
-We provide a dockerfile to build a docker image with all the necessary
-dependencies.
-1. Building the image.
-    ```
-    docker build -t dac .
-    ```
-2. Using the image.
+### Compression with constant GPU memory regardless of input length:
 
-    Usage on CPU:
-    ```
-    docker run dac <command>
-    ```
+```python
+import dac_jax
 
-    Usage on GPU:
-    ```
-    docker run --gpus=all dac <command>
-    ```
+import jax
+import jax.numpy as jnp
+import librosa
 
-    `<command>` can be one of the compression and reconstruction commands listed
-    above. For example, if you want to run compression,
+# Download a model and set padding to False because we will use the JIT-functions.
+model, variables = dac_jax.load_model(model_type="44khz", padding=False)
 
-    ```
-    docker run --gpus=all dac python3 -m dac encode ...
-    ```
+# Load a mono audio file
+signal, sample_rate = librosa.load('input.wav', sr=44100, mono=True, duration=.5)
 
+signal = jnp.array(signal, dtype=jnp.float32)
+while signal.ndim < 3:
+    signal = jnp.expand_dims(signal, axis=0)
+
+# Jit-compile these functions because they're used inside a loop over chunks.
+@jax.jit
+def compress_chunk(x):
+    return model.apply(variables, x, method='compress_chunk')
+
+@jax.jit
+def decompress_chunk(c):
+    return model.apply(variables, c, method='decompress_chunk')
+
+win_duration = 0.5  # Adjust based on your GPU's memory size
+dac_file = model.compress(compress_chunk, signal, sample_rate, win_duration=win_duration)
+
+# Save and load to and from disk
+dac_file.save("compressed.dac")
+dac_file = dac_jax.DACFile.load("compressed.dac")
+
+# Decompress it back to audio
+y = model.decompress(decompress_chunk, dac_file)
+```
 
 ## Training
 The baseline model configuration can be trained using the following commands.
 
-### Pre-requisites
-Please install the correct dependencies
-```
-pip install -e ".[dev]"
+```bash
+python scripts/train.py --args.load conf/base.yml
 ```
 
-## Environment setup
-
-We have provided a Dockerfile and docker compose setup that makes running experiments easy.
-
-To build the docker image do:
-
-```
-docker compose build
-```
-
-Then, to launch a container, do:
-
-```
-docker compose run -p 8888:8888 -p 6006:6006 dev
-```
-
-The port arguments (`-p`) are optional, but useful if you want to launch a Jupyter and Tensorboard instances within the container. The
-default password for Jupyter is `password`, and the current directory
-is mounted to `/u/home/src`, which also becomes the working directory.
-
-Then, run your training command.
-
-
-### Single GPU training
-```
-export CUDA_VISIBLE_DEVICES=0
-python scripts/train.py --args.load conf/ablations/baseline.yml --save_path runs/baseline/
-```
-
-### Multi GPU training
-```
-export CUDA_VISIBLE_DEVICES=0,1
-torchrun --nproc_per_node gpu scripts/train.py --args.load conf/ablations/baseline.yml --save_path runs/baseline/
+In root directory, monitor with Tensorboard (`runs` will appear next to `scripts`):
+```bash
+tensorboard --logdir ./runs
 ```
 
 ## Testing
-We provide two test scripts to test CLI + training functionality. Please
-make sure that the trainig pre-requisites are satisfied before launching these
-tests. To launch these tests please run
+
 ```
 python -m pytest tests
 ```
 
-## Results
+## Limitations
 
-<p align="left">
-<img src="./assets/objective_comparisons.png" width=75%></p>
+Pull requests—especially ones which address any of the limitations below—are welcome.
+
+* PyTorch is required as a dependency because it's used to load model weights before converting to JAX. As long as this is required, we recommend installing the CPU version of [PyTorch](https://pytorch.org/get-started/locally/).
+* We hope to remove [audiotools](https://github.com/descriptinc/audiotools) as a dependency since it's a PyTorch library.
+* We implement the "chunked" `compress`/`decompress` methods from the PyTorch repository, although this technique has some problems outlined [here](https://github.com/descriptinc/descript-audio-codec/issues/39).
+* We have not performed a full training run, although we have tested the train scripts, loss functions and eval metrics.
+* If you want to perform a training run—especially one which reproduces the original paper—you should examine any "todo" in `train.py` or in the config files.
+* We have not run all evaluation scripts in the `scripts` directory.
+* The model architecture code (`model/dac.py`) has many static methods to help with finding DAC's `delay` and `output_length`. Please help us refactor this so that code is not so duplicated and at risk of typos.
+* In `audio_utils.py` we use [DM_AUX's](https://github.com/google-deepmind/dm_aux) STFT function instead of `jax.scipy.signal.stft`.
+* The source code of DAC-JAX has several `todo:` markings which indicate (mostly minor) improvements we'd like to have.
+* We don't have a Docker image yet like the original [DAC repository](https://github.com/descriptinc/descript-audio-codec) does.
+* Please check the limitations of [argbind](https://github.com/pseeth/argbind?tab=readme-ov-file#limitations-and-known-issues).
+
+## Citation
+
+If you use DAC-JAX in your work, please cite the original DAC:
+
+```
+@article{kumar2024high,
+  title={High-fidelity audio compression with improved rvqgan},
+  author={Kumar, Rithesh and Seetharaman, Prem and Luebs, Alejandro and Kumar, Ishaan and Kumar, Kundan},
+  journal={Advances in Neural Information Processing Systems},
+  volume={36},
+  year={2024}
+}
+```
+
+and DAC-JAX:
+
+**Check back later for the arXiv citation!**

@@ -1,439 +1,690 @@
+# from __future__ import annotations  # we can't import this due to clu.metrics
+
 import os
-import sys
+os.environ["XLA_FLAGS"] = (
+    # '--xla_force_host_platform_device_count=1'
+    ' --xla_gpu_deterministic_ops=true'  # todo: https://github.com/google/flax/discussions/3382
+    # ' --xla_dump_to=tmp/xla_dump'
+    )
+# os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+# Pre-allocate 90% of TPU memory to minimize memory fragmentation and allocation
+# overhead
+# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
+
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+from typing import Tuple
+from typing import TypedDict
+import datetime
+import time
+from functools import partial
+import shutil
 import warnings
-from dataclasses import dataclass
-from pathlib import Path
 
 import argbind
-import torch
-from audiotools import AudioSignal
-from audiotools import ml
-from audiotools.core import util
-from audiotools.data import transforms
-from audiotools.data.datasets import AudioDataset
-from audiotools.data.datasets import AudioLoader
-from audiotools.data.datasets import ConcatDataset
-from audiotools.ml.decorators import timer
-from audiotools.ml.decorators import Tracker
-from audiotools.ml.decorators import when
-from torch.utils.tensorboard import SummaryWriter
+from absl import logging
+import tqdm
+import numpy as np
+import jax
+jax.config.update('jax_threefry_partitionable', True)
+assert jax.config.jax_threefry_partitionable is True
+assert jax.config.jax_default_prng_impl == 'threefry2x32'
+from jax import random, numpy as jnp
 
-import dac
+from clu import metric_writers
+from clu.metrics import Average, Collection
+from flax.training.train_state import TrainState
+from flax.training.early_stopping import EarlyStopping
+from flax import struct
+from flax import jax_utils
+import optax
 
-warnings.filterwarnings("ignore", category=UserWarning)
+import orbax.checkpoint as ocp
 
-# Enable cudnn autotuner to speed up training
-# (can be altered by the funcs.seed function)
-torch.backends.cudnn.benchmark = bool(int(os.getenv("CUDNN_BENCHMARK", 1)))
-# Uncomment to trade memory for speed.
+from einops import rearrange
 
-# Optimizers
-AdamW = argbind.bind(torch.optim.AdamW, "generator", "discriminator")
-Accelerator = argbind.bind(ml.Accelerator, without_prefix=True)
+import tensorflow as tf
 
+from input_pipeline import AudioDataset
 
-@argbind.bind("generator", "discriminator")
-def ExponentialLR(optimizer, gamma: float = 1.0):
-    return torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma)
+from dac_jax.nn.loss import l1_loss, multiscale_stft_loss, mel_spectrogram_loss, generator_loss, discriminator_loss
+from dac_jax.model import DAC, Discriminator
+from dac_jax import load_model
+from dac_jax.audio_utils import volume_norm, phase_shift, rescale_audio
 
+warnings.filterwarnings("ignore", category=UserWarning)  # ignore librosa warnings about mel filters
+
+SAMPLE_RATE = 44100  # todo: get from config file
 
 # Models
-DAC = argbind.bind(dac.model.DAC)
-Discriminator = argbind.bind(dac.model.Discriminator)
+DAC = argbind.bind(DAC)
+Discriminator = argbind.bind(Discriminator)
 
-# Data
-AudioDataset = argbind.bind(AudioDataset, "train", "val")
-AudioLoader = argbind.bind(AudioLoader, "train", "val")
-
-# Transforms
-filter_fn = lambda fn: hasattr(fn, "transform") and fn.__qualname__ not in [
-    "BaseTransform",
-    "Compose",
-    "Choose",
-]
-tfm = argbind.bind_module(transforms, "train", "val", filter_fn=filter_fn)
-
-# Loss
-filter_fn = lambda fn: hasattr(fn, "forward") and "Loss" in fn.__name__
-losses = argbind.bind_module(dac.nn.loss, filter_fn=filter_fn)
+# Losses
+multiscale_stft_loss = argbind.bind(multiscale_stft_loss)
+mel_spectrogram_loss = argbind.bind(mel_spectrogram_loss)
+mel_spectrogram_loss = partial(mel_spectrogram_loss, sample_rate=SAMPLE_RATE)
 
 
-def get_infinite_loader(dataloader):
-    while True:
-        for batch in dataloader:
-            yield batch
+# todo: This class's timed values aren't accurate because it doesn't call block_until_ready() on the last line of
+#  whatever code is in the body. In scripts/benchmark.py we do call block_until_ready()
+class TimerUtil:
+    def __init__(self):
+        """
+        Initializes the TimerUtil.
+        """
+        self.elapsed_time = 0
+        self.start_time = self.end_time = 0
+        self.num_events = 0
+
+    def __enter__(self):
+        self.elapsed_time = 0
+        self.start_time = time.time()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.end_time = time.time()
+        self.elapsed_time += self.end_time - self.start_time
+        self.num_events += 1
+
+        # Handle exceptions gracefully
+        if exc_type is not None:
+            print(f"Exception: {exc_val}")
+            return False  # Propagate exception
+        return True
+
+    def clear(self):
+        self.elapsed_time = 0
+
+    @property
+    def avg_time(self):
+        if self.num_events == 0:
+            return -1
+        return self.elapsed_time / self.num_events
 
 
-@argbind.bind("train", "val")
-def build_transform(
-    augment_prob: float = 1.0,
-    preprocess: list = ["Identity"],
-    augment: list = ["Identity"],
-    postprocess: list = ["Identity"],
-):
-    to_tfm = lambda l: [getattr(tfm, x)() for x in l]
-    preprocess = transforms.Compose(*to_tfm(preprocess), name="preprocess")
-    augment = transforms.Compose(*to_tfm(augment), name="augment", prob=augment_prob)
-    postprocess = transforms.Compose(*to_tfm(postprocess), name="postprocess")
-    transform = transforms.Compose(preprocess, augment, postprocess)
-    return transform
+@argbind.bind()
+def get_logger(level='DEBUG'):
+
+    import logging as logging_py
+    logger = logging_py.getLogger('train')
+
+    # create console handler and set level to debug
+    ch = logging_py.StreamHandler()
+    ch.setLevel(level.upper())
+    formatter = logging_py.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                                     datefmt='%m/%d/%Y %I:%M:%S %p')
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+
+    return logger
 
 
-@argbind.bind("train", "val", "test")
-def build_dataset(
-    sample_rate: int,
-    folders: dict = None,
-):
-    # Give one loader per key/value of dictionary, where
-    # value is a list of folders. Create a dataset for each one.
-    # Concatenate the datasets with ConcatDataset, which
-    # cycles through them.
-    datasets = []
-    for _, v in folders.items():
-        loader = AudioLoader(sources=v)
-        transform = build_transform()
-        dataset = AudioDataset(loader, sample_rate, transform=transform)
-        datasets.append(dataset)
-
-    dataset = ConcatDataset(datasets)
-    dataset.transform = transform
-    return dataset
+logger = get_logger()
 
 
-@dataclass
-class State:
-    generator: DAC
-    optimizer_g: AdamW
-    scheduler_g: ExponentialLR
-
-    discriminator: Discriminator
-    optimizer_d: AdamW
-    scheduler_d: ExponentialLR
-
-    stft_loss: losses.MultiScaleSTFTLoss
-    mel_loss: losses.MelSpectrogramLoss
-    gan_loss: losses.GANLoss
-    waveform_loss: losses.L1Loss
-
-    train_data: AudioDataset
-    val_data: AudioDataset
-
-    tracker: Tracker
+def is_process_main():
+    return jax.process_index() == 0
 
 
-@argbind.bind(without_prefix=True)
-def load(
-    args,
-    accel: ml.Accelerator,
-    tracker: Tracker,
-    save_path: str,
-    resume: bool = False,
-    tag: str = "latest",
-    load_weights: bool = False,
-):
-    generator, g_extra = None, {}
-    discriminator, d_extra = None, {}
+def prepare_tf_data(xs):
+    """Convert an input batch from tf Tensors to numpy arrays."""
+    local_device_count = jax.local_device_count()
+    def _prepare(x):
+        # Use _numpy() for zero-copy conversion between TF and NumPy.
+        x = x._numpy()  # pylint: disable=protected-access
 
-    if resume:
-        kwargs = {
-            "folder": f"{save_path}/{tag}",
-            "map_location": "cpu",
-            "package": not load_weights,
+        # reshape (host_batch_size, channels, duration samples) to
+        # (local_devices, device_batch_size, channels, duration samples)
+        return x.reshape((local_device_count, -1) + x.shape[1:])
+
+    return jax.tree_util.tree_map(_prepare, xs)
+
+
+@argbind.bind('train', 'val', 'test')
+def create_dataset(batch_size: int, dtype=tf.float32, repeat=False, duration=0.2, sources: dict = None, shuffle=False,
+                   channels=1, random_offset=False, sample_rate=SAMPLE_RATE) -> Tuple[tf.data.Dataset, float]:
+
+    assert sources is not None
+
+    ds = AudioDataset(sources=sources, duration=duration, batch_size=batch_size, dtype=dtype, repeat=repeat,
+                      shuffle=shuffle, channels=channels, sample_rate=sample_rate, random_offset=bool(random_offset))
+    ds = map(prepare_tf_data, ds)
+    ds = jax_utils.prefetch_to_device(ds, size=2)  # todo: pick size
+    return ds, duration
+
+
+@struct.dataclass
+class MyMetrics(Collection):
+    loss: Average.from_output('loss')
+    vq_commitment_loss: Average.from_output('vq/commitment_loss')
+    codebook_loss: Average.from_output('vq/codebook_loss')
+    disc_loss: Average.from_output('adv/disc_loss')
+    stft_loss: Average.from_output('stft/loss')
+    mel_loss: Average.from_output('mel/loss')
+    l1_loss: Average.from_output('waveform/loss')
+    gen_loss: Average.from_output('adv/gen_loss')
+    feat_loss: Average.from_output('adv/feat_loss')
+
+
+@struct.dataclass
+class GenDiscState(struct.PyTreeNode):
+    generator: TrainState
+    discriminator: TrainState
+
+
+@argbind.bind()
+def create_generator(key,
+                     shape,
+                     learning_rate: float = 1e-4,
+                     lr_gamma: float = 0.999996,
+                     adam_b1: float = 0.8,
+                     adam_b2: float = 0.99,
+                     adam_weight_decay: float = 1e-4,
+                     grad_clip: float = 1e3,
+                     tabulate=False,
+                     ) -> TrainState:
+
+    # Exponential decay of the learning rate.
+    scheduler = optax.exponential_decay(
+        init_value=float(learning_rate),
+        transition_steps=1,
+        decay_rate=lr_gamma)
+
+    # Combining gradient transforms using `optax.chain`.
+    gradient_transform = optax.chain(
+        optax.clip_by_global_norm(grad_clip),
+        optax.scale_by_adam(b1=adam_b1, b2=adam_b2),
+        optax.add_decayed_weights(float(adam_weight_decay)),  # this puts the W in AdamW
+        optax.scale_by_schedule(scheduler),
+        optax.scale(-1.0)  # gradient descent
+    )
+
+    load_weights = False  # todo: if you're curious about how a pre-trained model performs
+    if load_weights:
+        model, variables = load_model(model_type="44khz", model_bitrate="8kbps")
+        params = variables['params']
+        del variables
+    else:
+        model = DAC()
+        x = jnp.ones(shape=shape)
+        subkey1, subkey2 = random.split(key)
+        params = model.init({'params': subkey1, 'rng_stream': subkey2}, x)['params']
+
+    if tabulate:
+        print(model.tabulate({'params': subkey1, 'rng_stream': subkey2}, x,
+                             depth=3,
+                             compute_flops=True,
+                             compute_vjp_flops=True,
+                             # column_kwargs={'width': 200},
+                             console_kwargs={'width': 400},
+                             ))
+
+    state = TrainState.create(apply_fn=model.apply, params=params, tx=gradient_transform)
+    return state
+
+
+@argbind.bind()
+def create_discriminator(key,
+                         shape,
+                         learning_rate: float = 1e-4,
+                         lr_gamma: float = 0.999996,
+                         adam_b1: float = 0.8,
+                         adam_b2: float = 0.9,
+                         adam_weight_decay: float = 1e-4,
+                         grad_clip: float = 10,
+                         tabulate=False,
+                         ) -> TrainState:
+
+    # Exponential decay of the learning rate.
+    scheduler = optax.exponential_decay(
+        init_value=float(learning_rate),
+        transition_steps=1,
+        decay_rate=lr_gamma)
+
+    gradient_transform = optax.chain(
+        optax.clip_by_global_norm(grad_clip),
+        optax.scale_by_adam(b1=adam_b1, b2=adam_b2),
+        optax.add_decayed_weights(float(adam_weight_decay)),  # this puts the W in "AdamW"
+        optax.scale_by_schedule(scheduler),
+        optax.scale(-1.0)  # gradient descent
+    )
+
+    model = Discriminator()
+
+    x = jnp.ones(shape=shape)
+    params = model.init(key, x)['params']
+
+    if tabulate:
+        print(model.tabulate(random.key(0), x,
+                             depth=3,
+                             compute_flops=True,
+                             compute_vjp_flops=True,
+                             # column_kwargs={'width': 200},
+                             console_kwargs={'width': 400},
+                             ))
+
+    state = TrainState.create(apply_fn=model.apply, params=params, tx=gradient_transform)
+    return state
+
+
+@partial(jax.pmap, axis_name='ensemble', static_broadcasted_argnums=(1,))
+def create_train_state(key, shape) -> GenDiscState:
+
+    key, subkey = random.split(key)
+
+    generator_state = create_generator(subkey, shape)
+    key, subkey = random.split(key)
+    discriminator_state = create_discriminator(subkey, shape)
+
+    state = GenDiscState(generator=generator_state, discriminator=discriminator_state)
+    train_metrics = MyMetrics.empty()
+    eval_metrics = MyMetrics.empty()
+
+    return state, train_metrics, eval_metrics
+
+
+def compute_train_metrics(*, train_metrics: MyMetrics, output) -> MyMetrics:
+    return train_metrics.merge(jax_utils.replicate(train_metrics.single_from_model_output(**output)))
+
+
+def compute_eval_metrics(*, eval_metrics: MyMetrics, output) -> MyMetrics:
+    return eval_metrics.merge(jax_utils.replicate(eval_metrics.single_from_model_output(**output)))
+
+
+@partial(jax.pmap, axis_name='ensemble')
+@argbind.bind()
+def eval_step(rng, state: GenDiscState, audio_data, lambdas=None):
+
+    if lambdas is None:
+        lambdas = {
+            'mel/loss': 15.0,
+            'adv/feat_loss': 2.0,
+            'adv/gen_loss': 1.0,
+            'vq/commitment_loss': 0.25,
+            'vq/codebook_loss': 1.0,
         }
-        tracker.print(f"Resuming from {str(Path('.').absolute())}/{kwargs['folder']}")
-        if (Path(kwargs["folder"]) / "dac").exists():
-            generator, g_extra = DAC.load_from_folder(**kwargs)
-        if (Path(kwargs["folder"]) / "discriminator").exists():
-            discriminator, d_extra = Discriminator.load_from_folder(**kwargs)
 
-    generator = DAC() if generator is None else generator
-    discriminator = Discriminator() if discriminator is None else discriminator
+    audio_data = audio_data['audio_data']
+    audio_data = jnp.squeeze(audio_data, axis=0)
 
-    tracker.print(generator)
-    tracker.print(discriminator)
+    audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t')
 
-    generator = accel.prepare_model(generator)
-    discriminator = accel.prepare_model(discriminator)
+    rngs = {'rng_stream': rng}
+    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, SAMPLE_RATE, train=False,
+                                      rngs=rngs)
+    recons = output['audio']
 
-    with argbind.scope(args, "generator"):
-        optimizer_g = AdamW(generator.parameters(), use_zero=accel.use_ddp)
-        scheduler_g = ExponentialLR(optimizer_g)
-    with argbind.scope(args, "discriminator"):
-        optimizer_d = AdamW(discriminator.parameters(), use_zero=accel.use_ddp)
-        scheduler_d = ExponentialLR(optimizer_d)
+    output['stft/loss'] = multiscale_stft_loss(audio_data, recons)
+    output['mel/loss'] = mel_spectrogram_loss(audio_data, recons)
+    output['waveform/loss'] = l1_loss(audio_data, recons)
 
-    if "optimizer.pth" in g_extra:
-        optimizer_g.load_state_dict(g_extra["optimizer.pth"])
-    if "scheduler.pth" in g_extra:
-        scheduler_g.load_state_dict(g_extra["scheduler.pth"])
-    if "tracker.pth" in g_extra:
-        tracker.load_state_dict(g_extra["tracker.pth"])
+    fake = state.discriminator.apply_fn({'params': state.discriminator.params}, recons)
+    real = state.discriminator.apply_fn({'params': state.discriminator.params}, audio_data)
 
-    if "optimizer.pth" in d_extra:
-        optimizer_d.load_state_dict(d_extra["optimizer.pth"])
-    if "scheduler.pth" in d_extra:
-        scheduler_d.load_state_dict(d_extra["scheduler.pth"])
+    output['adv/disc_loss'] = discriminator_loss(fake, real)
+    (
+        output['adv/gen_loss'],
+        output['adv/feat_loss'],
+    ) = generator_loss(fake, real)
 
-    sample_rate = accel.unwrap(generator).sample_rate
-    with argbind.scope(args, "train"):
-        train_data = build_dataset(sample_rate)
-    with argbind.scope(args, "val"):
-        val_data = build_dataset(sample_rate)
+    output['loss'] = sum([v * output[k] for k, v in lambdas.items() if k in output])
 
-    waveform_loss = losses.L1Loss()
-    stft_loss = losses.MultiScaleSTFTLoss()
-    mel_loss = losses.MelSpectrogramLoss()
-    gan_loss = losses.GANLoss(discriminator)
-
-    return State(
-        generator=generator,
-        optimizer_g=optimizer_g,
-        scheduler_g=scheduler_g,
-        discriminator=discriminator,
-        optimizer_d=optimizer_d,
-        scheduler_d=scheduler_d,
-        waveform_loss=waveform_loss,
-        stft_loss=stft_loss,
-        mel_loss=mel_loss,
-        gan_loss=gan_loss,
-        tracker=tracker,
-        train_data=train_data,
-        val_data=val_data,
-    )
-
-
-@timer()
-@torch.no_grad()
-def val_loop(batch, state, accel):
-    state.generator.eval()
-    batch = util.prepare_batch(batch, accel.device)
-    signal = state.val_data.transform(
-        batch["signal"].clone(), **batch["transform_args"]
-    )
-
-    out = state.generator(signal.audio_data, signal.sample_rate)
-    recons = AudioSignal(out["audio"], signal.sample_rate)
-
-    return {
-        "loss": state.mel_loss(recons, signal),
-        "mel/loss": state.mel_loss(recons, signal),
-        "stft/loss": state.stft_loss(recons, signal),
-        "waveform/loss": state.waveform_loss(recons, signal),
-    }
-
-
-@timer()
-def train_loop(state, batch, accel, lambdas):
-    state.generator.train()
-    state.discriminator.train()
-    output = {}
-
-    batch = util.prepare_batch(batch, accel.device)
-    with torch.no_grad():
-        signal = state.train_data.transform(
-            batch["signal"].clone(), **batch["transform_args"]
-        )
-
-    with accel.autocast():
-        out = state.generator(signal.audio_data, signal.sample_rate)
-        recons = AudioSignal(out["audio"], signal.sample_rate)
-        commitment_loss = out["vq/commitment_loss"]
-        codebook_loss = out["vq/codebook_loss"]
-
-    with accel.autocast():
-        output["adv/disc_loss"] = state.gan_loss.discriminator_loss(recons, signal)
-
-    state.optimizer_d.zero_grad()
-    accel.backward(output["adv/disc_loss"])
-    accel.scaler.unscale_(state.optimizer_d)
-    output["other/grad_norm_d"] = torch.nn.utils.clip_grad_norm_(
-        state.discriminator.parameters(), 10.0
-    )
-    accel.step(state.optimizer_d)
-    state.scheduler_d.step()
-
-    with accel.autocast():
-        output["stft/loss"] = state.stft_loss(recons, signal)
-        output["mel/loss"] = state.mel_loss(recons, signal)
-        output["waveform/loss"] = state.waveform_loss(recons, signal)
-        (
-            output["adv/gen_loss"],
-            output["adv/feat_loss"],
-        ) = state.gan_loss.generator_loss(recons, signal)
-        output["vq/commitment_loss"] = commitment_loss
-        output["vq/codebook_loss"] = codebook_loss
-        output["loss"] = sum([v * output[k] for k, v in lambdas.items() if k in output])
-
-    state.optimizer_g.zero_grad()
-    accel.backward(output["loss"])
-    accel.scaler.unscale_(state.optimizer_g)
-    output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
-        state.generator.parameters(), 1e3
-    )
-    accel.step(state.optimizer_g)
-    state.scheduler_g.step()
-    accel.update()
-
-    output["other/learning_rate"] = state.optimizer_g.param_groups[0]["lr"]
-    output["other/batch_size"] = signal.batch_size * accel.world_size
-
-    return {k: v for k, v in sorted(output.items())}
-
-
-def checkpoint(state, save_iters, save_path):
-    metadata = {"logs": state.tracker.history}
-
-    tags = ["latest"]
-    state.tracker.print(f"Saving to {str(Path('.').absolute())}")
-    if state.tracker.is_best("val", "mel/loss"):
-        state.tracker.print(f"Best generator so far")
-        tags.append("best")
-    if state.tracker.step in save_iters:
-        tags.append(f"{state.tracker.step // 1000}k")
-
-    for tag in tags:
-        generator_extra = {
-            "optimizer.pth": state.optimizer_g.state_dict(),
-            "scheduler.pth": state.scheduler_g.state_dict(),
-            "tracker.pth": state.tracker.state_dict(),
-            "metadata.pth": metadata,
-        }
-        accel.unwrap(state.generator).metadata = metadata
-        accel.unwrap(state.generator).save_to_folder(
-            f"{save_path}/{tag}", generator_extra
-        )
-        discriminator_extra = {
-            "optimizer.pth": state.optimizer_d.state_dict(),
-            "scheduler.pth": state.scheduler_d.state_dict(),
-        }
-        accel.unwrap(state.discriminator).save_to_folder(
-            f"{save_path}/{tag}", discriminator_extra
-        )
-
-
-@torch.no_grad()
-def save_samples(state, val_idx, writer):
-    state.tracker.print("Saving audio samples to TensorBoard")
-    state.generator.eval()
-
-    samples = [state.val_data[idx] for idx in val_idx]
-    batch = state.val_data.collate(samples)
-    batch = util.prepare_batch(batch, accel.device)
-    signal = state.train_data.transform(
-        batch["signal"].clone(), **batch["transform_args"]
-    )
-
-    out = state.generator(signal.audio_data, signal.sample_rate)
-    recons = AudioSignal(out["audio"], signal.sample_rate)
-
-    audio_dict = {"recons": recons}
-    if state.tracker.step == 0:
-        audio_dict["signal"] = signal
-
-    for k, v in audio_dict.items():
-        for nb in range(v.batch_size):
-            v[nb].cpu().write_audio_to_tb(
-                f"{k}/sample_{nb}.wav", writer, state.tracker.step
-            )
-
-
-def validate(state, val_dataloader, accel):
-    for batch in val_dataloader:
-        output = val_loop(batch, state, accel)
-    # Consolidate state dicts if using ZeroRedundancyOptimizer
-    if hasattr(state.optimizer_g, "consolidate_state_dict"):
-        state.optimizer_g.consolidate_state_dict()
-        state.optimizer_d.consolidate_state_dict()
     return output
 
 
-@argbind.bind(without_prefix=True)
-def train(
-    args,
-    accel: ml.Accelerator,
-    seed: int = 0,
-    save_path: str = "ckpt",
-    num_iters: int = 250000,
-    save_iters: list = [10000, 50000, 100000, 200000],
-    sample_freq: int = 10000,
-    valid_freq: int = 1000,
-    batch_size: int = 12,
-    val_batch_size: int = 10,
-    num_workers: int = 8,
-    val_idx: list = [0, 1, 2, 3, 4, 5, 6, 7],
-    lambdas: dict = {
-        "mel/loss": 100.0,
-        "adv/feat_loss": 2.0,
-        "adv/gen_loss": 1.0,
-        "vq/commitment_loss": 0.25,
-        "vq/codebook_loss": 1.0,
-    },
-):
-    util.seed(seed)
-    Path(save_path).mkdir(exist_ok=True, parents=True)
-    writer = (
-        SummaryWriter(log_dir=f"{save_path}/logs") if accel.local_rank == 0 else None
+def train_step_discriminator(state: GenDiscState, audio_data, output) -> Tuple[GenDiscState, struct.PyTreeNode]:
+
+    def loss_fn(params):
+        # note: you could calculate with the generator again, since its weights were just updated,
+        # but we prefer not to in order to run faster.
+        # output = state.generator.apply_fn({'params': state.generator.params}, audio_data, SAMPLE_RATE, rngs=rngs,
+        #                                   train=True  # todo: maybe pick Train=False even though DAC didn't
+        #                                   )
+        recons = output['audio']
+
+        fake = state.discriminator.apply_fn({'params': params}, recons)
+        real = state.discriminator.apply_fn({'params': params}, audio_data)
+
+        loss = output['adv/disc_loss'] = discriminator_loss(fake, real)
+
+        return loss
+
+    grad_fn = jax.value_and_grad(loss_fn)
+    loss, grads = grad_fn(state.discriminator.params)
+    loss = jax.lax.pmean(loss, axis_name='ensemble')
+    grads = jax.lax.pmean(grads, axis_name='ensemble')
+
+    state = state.replace(discriminator=state.discriminator.apply_gradients(grads=grads))
+    return state, loss
+
+
+@argbind.bind()
+def train_step_generator(rng, state: GenDiscState, audio_data, lambdas=None) -> Tuple[GenDiscState, dict]:
+    rngs = {'rng_stream': rng}
+
+    if lambdas is None:
+        lambdas = {
+            'mel/loss': 15.0,
+            'adv/feat_loss': 2.0,
+            'adv/gen_loss': 1.0,
+            'vq/commitment_loss': 0.25,
+            'vq/codebook_loss': 1.0,
+        }
+
+    def loss_fn(params):
+
+        output = state.generator.apply_fn({'params': params}, audio_data, SAMPLE_RATE, rngs=rngs)
+        recons = output['audio']
+
+        fake = state.discriminator.apply_fn({'params': state.discriminator.params}, recons)
+        real = state.discriminator.apply_fn({'params': state.discriminator.params}, audio_data)
+
+        output['stft/loss'] = multiscale_stft_loss(audio_data, recons)
+        output['mel/loss'] = mel_spectrogram_loss(audio_data, recons)
+        output['waveform/loss'] = l1_loss(audio_data, recons)
+        (
+            output['adv/gen_loss'],
+            output['adv/feat_loss'],
+        ) = generator_loss(fake, real)
+        loss = output['loss'] = sum([v * output[k] for k, v in lambdas.items() if k in output])
+        return loss, output
+
+    grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
+    (loss, output), grads = grad_fn(state.generator.params)
+    grads = jax.lax.pmean(grads, axis_name='ensemble')
+
+    state = state.replace(generator=state.generator.apply_gradients(grads=grads))
+    return state, output
+
+
+@argbind.bind()
+def augment_data(rng, audio_data, min_db=-16, max_db=-16):
+
+    batch_size, channels = audio_data.shape[0:2]
+
+    # note: apply target_db based on both channels
+    target_db = random.uniform(rng, shape=(batch_size,), minval=min_db, maxval=max_db)
+
+    audio_data, loudness = volume_norm(audio_data, target_db, SAMPLE_RATE, filter_class="K-weighting", block_size=0.400)
+
+    # note: apply different phase to each channel
+    phase_angles = random.uniform(rng, shape=(batch_size, channels), minval=-jnp.pi, maxval=jnp.pi)
+    audio_data = phase_shift(audio_data, phase_angles)
+
+    audio_data = rescale_audio(audio_data)
+
+    return audio_data
+
+
+@partial(jax.pmap, axis_name='ensemble', donate_argnums=(1,))
+def train_step(rng, state: GenDiscState, audio_data) -> Tuple[GenDiscState, dict]:
+    """Train for a single step."""
+
+    audio_data = audio_data['audio_data']
+
+    audio_data = jnp.squeeze(audio_data, axis=0)
+
+    subkey1, subkey2 = random.split(rng, num=2)
+
+    audio_data = augment_data(subkey1, audio_data)
+
+    audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t')
+
+    state, output = train_step_generator(subkey2, state, audio_data)
+    state, loss = train_step_discriminator(state, audio_data, output)
+
+    output['adv/disc_loss'] = loss
+
+    return state, output
+
+
+@argbind.bind()
+def save_checkpoint(checkpoint_manager: ocp.CheckpointManager, state: GenDiscState, step: int, metrics=None):
+
+    if is_process_main():
+        # get train state from the first replica
+        main_state = jax.device_get(jax.tree_util.tree_map(lambda x: x[0], state))
+        ckpt = {'generator': main_state.generator, 'discriminator': main_state.discriminator}
+        save_args = ocp.args.StandardSave(ckpt)
+        checkpoint_manager.save(step, ckpt, args=save_args, metrics=metrics)
+        checkpoint_manager.wait_until_finished()
+
+
+@partial(jax.pmap, axis_name='ensemble')
+def save_samples(rng, state: GenDiscState, audio_data):
+    """Save audio samples to tensorboard."""
+    audio_data = audio_data['audio_data']
+    audio_data = jnp.squeeze(audio_data, axis=0)
+    batch_size = audio_data.shape[0]
+    audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t')
+
+    rngs = {'rng_stream': rng}
+    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, SAMPLE_RATE, train=False,
+                                      rngs=rngs)
+    recons = output['audio']
+    recons = rearrange(recons, '(b c) 1 t -> b c t', b=batch_size)
+    return recons
+
+
+@argbind.bind()
+def log_training(train_metrics: MyMetrics, step: int, timers: TypedDict('Info', {'name': TimerUtil}),
+                 writer: metric_writers.MultiWriter, log_every_steps=1):
+
+    if log_every_steps and (step % log_every_steps == 0):
+        summary = {}
+        summary.update({
+            f'train/{k}': v.item()
+            for k, v in train_metrics.unreplicate().compute().items()
+        })
+        for k, timer in timers.items():
+            summary[f'sec_per/{k}'] = timer.avg_time
+        writer.write_scalars(step, summary)
+        writer.flush()
+        # reset metrics for next logging
+        train_metrics = jax_utils.replicate(train_metrics.empty())
+
+    return train_metrics
+
+
+def log_eval(eval_metrics: MyMetrics, step: int, writer: metric_writers.MultiWriter):
+
+    summary = {}
+    summary.update({
+        f'eval/{k}': v.item()
+        for k, v in eval_metrics.unreplicate().compute().items()
+    })
+    writer.write_scalars(step, summary)
+    writer.flush()
+    # reset metrics for next logging
+    eval_metrics = jax_utils.replicate(eval_metrics.empty())
+
+    return summary, eval_metrics
+
+
+def split_device(key):
+    return random.split(key, jax.device_count())
+
+
+@argbind.bind()
+def train(args,
+          name=None,
+          num_iterations=250_000,
+          valid_freq=100,
+          sample_freq=100,
+          early_stop_patience=0,
+          ckpt_max_keep=2,
+          seed=0,
+          batch_size=4,
+          val_batch_size=1,
+          half_precision=False,
+          restore=False,
+          best_key='eval/loss',
+          best_mode='min',
+          enable_async_checkpointing=False,
+          log_level='info',
+          save_path='runs',
+          ):
+
+    logging.set_verbosity(logging.ERROR)  # absl logging
+    logger.setLevel(log_level.upper())  # native python logging
+
+    print(f'devices: {jax.devices()}')
+
+    if batch_size % jax.device_count() > 0:
+        raise ValueError('Batch size must be divisible by the number of devices')
+    local_batch_size = batch_size // jax.process_count()
+    local_val_batch_size = val_batch_size // jax.process_count()
+    del batch_size
+
+    platform = jax.local_devices()[0].platform
+
+    if half_precision:
+        if platform == 'tpu':
+            input_dtype = tf.bfloat16
+        else:
+            input_dtype = tf.float16
+    else:
+        input_dtype = tf.float32
+
+    if name is not None:
+        workdir = os.path.join(save_path, name)
+    else:
+        workdir = os.path.join(save_path, datetime.datetime.now().strftime('%m-%d_%H-%M-%S'))
+    del name
+
+    # if os.path.isdir(workdir) and '..' not in workdir:
+    #     logger.info(f"Deleting existing work directory: {workdir}")
+    #     shutil.rmtree(workdir)
+
+    writer = metric_writers.create_default_writer(logdir=workdir, just_logging=not is_process_main())
+
+    ckpt_dir = '/tmp/flax_ckpt'
+
+    if os.path.exists(ckpt_dir):
+        shutil.rmtree(ckpt_dir)  # Remove any existing checkpoints from the last run.
+
+    with argbind.scope(args, "train"):
+        train_iter, duration = create_dataset(batch_size=local_batch_size, dtype=input_dtype, repeat=True, shuffle=True,
+                                              random_offset=True)
+    with argbind.scope(args, "val"):
+        save_iter, _ = create_dataset(batch_size=local_val_batch_size, dtype=input_dtype, repeat=True)
+
+    n_channels = 1
+    shape = (local_batch_size, n_channels, round(SAMPLE_RATE * duration))
+    del duration
+    key = random.key(seed)
+
+    key, subkey = random.split(key)
+    state, train_metrics, eval_metrics = create_train_state(split_device(subkey), shape)
+
+    del shape
+
+    def best_fn(eval_metrics_summary) -> float:
+        return eval_metrics_summary[best_key]
+
+    checkpoint_manager = ocp.CheckpointManager(
+        directory=ckpt_dir + '/orbax/managed',
+        options=ocp.CheckpointManagerOptions(save_interval_steps=1, max_to_keep=ckpt_max_keep, best_fn=best_fn,
+                                             best_mode=best_mode,
+                                             enable_async_checkpointing=enable_async_checkpointing),
+        item_handlers=ocp.StandardCheckpointHandler()
     )
-    tracker = Tracker(
-        writer=writer, log_file=f"{save_path}/log.txt", rank=accel.local_rank
-    )
 
-    state = load(args, accel, tracker, save_path)
-    train_dataloader = accel.prepare_dataloader(
-        state.train_data,
-        start_idx=state.tracker.step * batch_size,
-        num_workers=num_workers,
-        batch_size=batch_size,
-        collate_fn=state.train_data.collate,
-    )
-    train_dataloader = get_infinite_loader(train_dataloader)
-    val_dataloader = accel.prepare_dataloader(
-        state.val_data,
-        start_idx=0,
-        num_workers=num_workers,
-        batch_size=val_batch_size,
-        collate_fn=state.val_data.collate,
-        persistent_workers=True if num_workers > 0 else False,
-    )
+    if restore:
+        latest_ckpt = checkpoint_manager.latest()
+        logger.info(f"Restoring latest checkpoint v{latest_ckpt}.")
+        restored = checkpoint_manager.restore(latest_ckpt)
+        state = restored.state
+        state = jax_utils.replicate(state)
+    else:
+        save_checkpoint(checkpoint_manager, state, 0,
+                        metrics={best_key: jnp.inf if best_mode == 'min' else -jnp.inf})
 
-    # Wrap the functions so that they neatly track in TensorBoard + progress bars
-    # and only run when specific conditions are met.
-    global train_loop, val_loop, validate, save_samples, checkpoint
-    train_loop = tracker.log("train", "value", history=False)(
-        tracker.track("train", num_iters, completed=state.tracker.step)(train_loop)
-    )
-    val_loop = tracker.track("val", len(val_dataloader))(val_loop)
-    validate = tracker.log("val", "mean")(validate)
+    hooks = []
+    # if is_process_main():
+    #     hooks += [periodic_actions.Profile(num_profile_steps=5, logdir=workdir)]  # todo:
 
-    # These functions run only on the 0-rank process
-    save_samples = when(lambda: accel.local_rank == 0)(save_samples)
-    checkpoint = when(lambda: accel.local_rank == 0)(checkpoint)
+    def make_timers():
+        return {'load_train_batch': TimerUtil(),
+                'train_step': TimerUtil(),
+                'train_metrics': TimerUtil()}
 
-    with tracker.live:
-        for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
-            train_loop(state, batch, accel, lambdas)
+    timers = make_timers()
 
-            last_iter = (
-                tracker.step == num_iters - 1 if num_iters is not None else False
-            )
-            if tracker.step % sample_freq == 0 or last_iter:
-                save_samples(state, val_idx, writer)
+    early_stop = EarlyStopping(min_delta=1e-3, patience=early_stop_patience)
 
-            if tracker.step % valid_freq == 0 or last_iter:
-                validate(state, val_dataloader, accel)
-                checkpoint(state, save_iters, save_path)
-                # Reset validation progress bar, print summary since last validation.
-                tracker.done("val", f"Iteration {tracker.step}")
+    for step in tqdm.trange(1, num_iterations+1, desc='Train Steps'):
+        with timers['load_train_batch']:
+            batch = next(train_iter)
+            batch = jax_utils.replicate(batch)
 
-            if last_iter:
+        key, subkey = random.split(key)
+
+        with timers['train_step']:
+            state, output = train_step(split_device(subkey), state, batch)
+
+        with timers['train_metrics']:
+            train_metrics = compute_train_metrics(train_metrics=train_metrics, output=output)
+
+        for hook in hooks:
+            hook(step)
+
+        train_metrics = log_training(train_metrics, step, timers, writer)
+        timers = make_timers()
+
+        if step % sample_freq == 0:
+            # Note: right now save_iter is just the validation dataset.
+            # We perform reconstruction and save the input and output to WAV, which shows in tensorboard.
+            # todo: we are just taking a single batch from the validation set. This could change.
+            save_batch = next(save_iter)
+            save_batch_replicated = jax_utils.replicate(save_batch)
+            recons = save_samples(split_device(subkey), state, save_batch_replicated)
+
+            signal = rearrange(save_batch['audio_data'], 'p b c t -> (p b) t c')
+            recons = rearrange(recons, 'p b c t -> (p b) t c', c=signal.shape[-1])
+
+            writer.write_audios(step=step,
+                                audios={
+                                    'signal': np.array(signal),
+                                    'recons': np.array(recons),
+                                },
+                                sample_rate=SAMPLE_RATE)
+            writer.flush()
+
+        if step % valid_freq == 0:
+            # Compute metrics on the validation set
+            with argbind.scope(args, "val"):
+                # todo: don't recreate the eval dataset multiple times
+                eval_iter, _ = create_dataset(batch_size=local_val_batch_size, dtype=input_dtype)
+            ran_once = False
+
+            with TimerUtil() as timer_util:
+                for test_batch in eval_iter:  # todo: use nested tqdm here
+                    ran_once = True
+                    test_batch = jax_utils.replicate(test_batch)
+                    key, subkey = random.split(key)
+                    output = eval_step(split_device(subkey), state, test_batch)
+                    eval_metrics = compute_eval_metrics(eval_metrics=eval_metrics, output=output)
+                assert ran_once
+            writer.write_scalars(step, {'sec_per/eval': timer_util.elapsed_time})  # validation time cost
+
+            summary, eval_metrics = log_eval(eval_metrics, step, writer)
+
+            early_stop = early_stop.update(summary[best_key])
+            if early_stop.should_stop:
+                logger.info(f'Met early stopping criteria, breaking at step {step}')
                 break
 
+            with TimerUtil() as timer_util:
+                save_checkpoint(checkpoint_manager, state, step, summary)
+            writer.write_scalars(step, {'sec_per/checkpoint': timer_util.elapsed_time})
 
-if __name__ == "__main__":
+            writer.flush()
+
+
+if __name__ == '__main__':
     args = argbind.parse_args()
-    args["args.debug"] = int(os.getenv("LOCAL_RANK", 0)) == 0
     with argbind.scope(args):
-        with Accelerator() as accel:
-            if accel.local_rank != 0:
-                sys.tracebacklimit = 0
-            train(args, accel)
+        train(args)

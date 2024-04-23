@@ -9,7 +9,7 @@ DAC.decoder_rates: [8, 8, 4, 2]
 DAC.n_codebooks: 9
 DAC.codebook_size: 1024
 DAC.codebook_dim: 8
-DAC.quantizer_dropout: 1.0
+DAC.quantizer_dropout: 1.0  # note: this turns into a bool
 
 # Discriminator
 Discriminator.sample_rate: 44100
@@ -24,67 +24,60 @@ Discriminator.bands:
   - [0.75, 1.0]
 
 # Optimization
-AdamW.betas: [0.8, 0.99]
-AdamW.lr: 0.0001
-ExponentialLR.gamma: 0.999996
+create_generator.adam_b1: 0.8
+create_generator.adam_b2: 0.99
+create_generator.learning_rate: 1e-4
+create_generator.lr_gamma: 0.999996
 
-amp: false
-val_batch_size: 100
-device: cuda
-num_iters: 250000
-save_iters: [10000, 50000, 100000, 200000]
-valid_freq: 1000
-sample_freq: 10000
-num_workers: 32
-val_idx: [0, 1, 2, 3, 4, 5, 6, 7]
-seed: 0
-lambdas:
+create_discriminator.adam_b1: 0.8
+create_discriminator.adam_b2: 0.99
+create_discriminator.learning_rate: 1e-4
+create_discriminator.lr_gamma: 0.999996
+
+train_step_generator.lambdas:
   mel/loss: 15.0
   adv/feat_loss: 2.0
   adv/gen_loss: 1.0
   vq/commitment_loss: 0.25
   vq/codebook_loss: 1.0
 
-VolumeNorm.db: [const, -16]
+eval_step.lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0
 
-# Transforms
-build_transform.preprocess:
-  - Identity
-build_transform.augment_prob: 0.0
-build_transform.augment:
-  - Identity
-build_transform.postprocess:
-  - VolumeNorm
-  - RescaleAudio
-  - ShiftPhase
+train.batch_size: 72
+train.val_batch_size: 100
+train.num_iterations: 250000
+train.valid_freq: 1000
+train.sample_freq: 10000
+train.early_stop_patience: 4
+train.ckpt_max_keep: 4
+train.seed: 0
+
+log_training.log_every_steps: 10
 
 # Loss setup
-MultiScaleSTFTLoss.window_lengths: [2048, 512]
-MelSpectrogramLoss.n_mels: [5, 10, 20, 40, 80, 160, 320]
-MelSpectrogramLoss.window_lengths: [32, 64, 128, 256, 512, 1024, 2048]
-MelSpectrogramLoss.mel_fmin: [0, 0, 0, 0, 0, 0, 0]
-MelSpectrogramLoss.mel_fmax: [null, null, null, null, null, null, null]
-MelSpectrogramLoss.pow: 1.0
-MelSpectrogramLoss.clamp_eps: 1.0e-5
-MelSpectrogramLoss.mag_weight: 0.0
+multiscale_stft_loss.window_lengths: [2048, 512]
+
+mel_spectrogram_loss.n_mels: [5, 10, 20, 40, 80, 160, 320]
+mel_spectrogram_loss.window_lengths: [32, 64, 128, 256, 512, 1024, 2048]
+mel_spectrogram_loss.lower_edge_hz: [0, 0, 0, 0, 0, 0, 0]
+mel_spectrogram_loss.upper_edge_hz: [null, null, null, null, null, null, null]
+mel_spectrogram_loss.pow: 1.0
+mel_spectrogram_loss.clamp_eps: 1.0e-5
+mel_spectrogram_loss.mag_weight: 0.0
+
+# Data Augmentation
+augment_data.min_db: -16
+augment_data.max_db: -16
 
 # Data
-batch_size: 72
-train/AudioDataset.duration: 0.38
-train/AudioDataset.n_examples: 10000000
-
-val/AudioDataset.duration: 5.0
-val/build_transform.augment_prob: 1.0
-val/AudioDataset.n_examples: 250
-
-test/AudioDataset.duration: 10.0
-test/build_transform.augment_prob: 1.0
-test/AudioDataset.n_examples: 1000
-
-AudioLoader.shuffle: true
-AudioDataset.without_replacement: true
-
-train/build_dataset.folders:
+train/create_dataset.duration: 0.38
+train/create_dataset.random_offset: 0.0  # todo: set this to 1.0 but then update all downstream code (AudioDataset)
+train/create_dataset.sources:
   speech_fb:
     - /data/daps/train
   speech_hq:
@@ -106,7 +99,8 @@ train/build_dataset.folders:
     - /data/audioset/data/unbalanced_train_segments/
     - /data/audioset/data/balanced_train_segments/
 
-val/build_dataset.folders:
+val/create_dataset.duration: 5.0
+val/create_dataset.sources:
   speech_hq:
     - /data/daps/val
   music_hq:
@@ -114,7 +108,8 @@ val/build_dataset.folders:
   general:
     - /data/audioset/data/eval_segments/
 
-test/build_dataset.folders:
+test/create_dataset.duration: 10.0
+test/create_dataset.sources:
   speech_hq:
     - /data/daps/test
   music_hq:

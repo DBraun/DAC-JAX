@@ -146,6 +146,7 @@ notebooks/*.mp4
 boards/
 samples/
 *.ipynb
+tmp/
 
 results.json
 metrics.csv

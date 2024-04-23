@@ -1,14 +1,14 @@
 from pathlib import Path
 
 import argbind
-import torch
 from audiotools import AudioSignal
-from audiotools.core import util
 from audiotools.ml.decorators import Tracker
 from train import Accelerator
 from train import DAC
 
-from dac.compare.encodec import Encodec
+from dac_jax.audio_utils import find_audio
+from dac_jax.compare.encodec import Encodec
+
 
 Encodec = argbind.bind(Encodec)
 
@@ -38,7 +38,6 @@ def load_state(
     return generator
 
 
-@torch.no_grad()
 def process(signal, accel, generator, **kwargs):
     signal = signal.to(accel.device)
     recons = generator(signal.audio_data, signal.sample_rate, **kwargs)["audio"]
@@ -48,7 +47,6 @@ def process(signal, accel, generator, **kwargs):
 
 
 @argbind.bind(without_prefix=True)
-@torch.no_grad()
 def get_samples(
     accel,
     path: str = "ckpt",
@@ -68,10 +66,9 @@ def get_samples(
         bandwidth=bandwidth,
         tag=model_tag,
     )
-    generator.eval()
     kwargs = {"n_quantizers": n_quantizers} if model_type == "dac" else {}
 
-    audio_files = util.find_audio(input)
+    audio_files = find_audio(input)
 
     global process
     process = tracker.track("process", len(audio_files))(process)

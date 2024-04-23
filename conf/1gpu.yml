@@ -1,6 +1,5 @@
 $include:
   - conf/base.yml
 
-batch_size: 12
-val_batch_size: 12
-num_workers: 4
+train.batch_size: 12
+train.val_batch_size: 12
