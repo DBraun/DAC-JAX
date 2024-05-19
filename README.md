@@ -39,7 +39,7 @@ You can read the DAC-JAX paper [here](https://drive.google.com/file/d/1HOzbxd6hW
     
     Or, if you intend to contribute, clone and do an [editable install](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs):
     ```bash
-    python -m pip install -e ".[dev]" .
+    python -m pip install -e ".[dev]"
     ```
 
 ### Weights
