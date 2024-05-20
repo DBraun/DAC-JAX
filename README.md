@@ -46,11 +46,11 @@ You can read the DAC-JAX paper [here](https://drive.google.com/file/d/1HOzbxd6hW
 The original Descript repository releases model weights under the MIT license. These weights are for models that natively support 16 kHz, 24kHz, and 44.1kHz sampling rates. Our scripts download these PyTorch weights and load them into JAX.
 Weights are automatically downloaded when you first run an `encode` or `decode` command. You can download them in advance with one of the following commands:
 ```bash
-python -m dac_jax download # downloads the default 44kHz variant
-python -m dac_jax download --model_type 44khz --model_bitrate 16kbps # downloads the 44kHz 16 kbps variant
-python -m dac_jax download --model_type 44khz # downloads the 44kHz variant
-python -m dac_jax download --model_type 24khz # downloads the 24kHz variant
-python -m dac_jax download --model_type 16khz # downloads the 16kHz variant
+python -m dac_jax download_model # downloads the default 44kHz variant
+python -m dac_jax download_model --model_type 44khz --model_bitrate 16kbps # downloads the 44kHz 16 kbps variant
+python -m dac_jax download_model --model_type 44khz # downloads the 44kHz variant
+python -m dac_jax download_model --model_type 24khz # downloads the 24kHz variant
+python -m dac_jax download_model --model_type 16khz # downloads the 16kHz variant
 ```
 
 The default download location is `~/.cache/dac_jax`. You can change the location by setting an **absolute path** value for an environment variable `DAC_JAX_CACHE`. For example, on macOS/Linux:
