@@ -5,7 +5,7 @@
 
 This repository is an **unofficial** JAX implementation of the PyTorch-based DAC and has no affiliation with Descript.
 
-You can read the DAC-JAX paper [here](https://drive.google.com/file/d/1HOzbxd6hWgKF2vynSv306-L30S7l7VYK/view?usp=sharing) (it will be on arXiv soon).
+You can read the DAC-JAX paper [here](https://arxiv.org/abs/2405.11554).
 
 ## Usage
 
@@ -208,4 +208,13 @@ If you use DAC-JAX in your work, please cite the original DAC:
 
 and DAC-JAX:
 
-**Check back later for the arXiv citation!**
+```
+@misc{braun2024dacjax,
+  title={{DAC-JAX}: A {JAX} Implementation of the Descript Audio Codec}, 
+  author={David Braun},
+  year={2024},
+  eprint={2405.11554},
+  archivePrefix={arXiv},
+  primaryClass={cs.SD}
+}
+```
