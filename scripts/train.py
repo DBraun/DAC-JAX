@@ -209,10 +209,11 @@ def create_generator(key,
     else:
         model = DAC()
         x = jnp.ones(shape=shape)
-        subkey1, subkey2 = random.split(key)
+        subkey1, subkey2, key = random.split(key, 3)
         params = model.init({'params': subkey1, 'rng_stream': subkey2}, x)['params']
 
     if tabulate:
+        subkey1, subkey2, key = random.split(key, 3)
         print(model.tabulate({'params': subkey1, 'rng_stream': subkey2}, x,
                              depth=3,
                              compute_flops=True,
