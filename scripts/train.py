@@ -576,7 +576,8 @@ def train(args,
     if is_process_main():
         hooks += [report_progress]
         hooks += [report_progress_eval]
-        hooks += [periodic_actions.Profile(num_profile_steps=10, logdir=workdir)]  # todo: pick num_profile_steps
+        # todo: the Profile hook seems slow, so we don't use it.
+        # hooks += [periodic_actions.Profile(num_profile_steps=10, profile_duration_ms=0, logdir=workdir)]
 
     early_stop = EarlyStopping(min_delta=1e-3, patience=early_stop_patience)
 
