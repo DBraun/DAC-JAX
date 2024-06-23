@@ -162,6 +162,8 @@ def create_generator(key,
         optax.scale(-1.0)  # gradient descent
     )
 
+    x = jnp.ones(shape=shape)
+
     load_weights = False  # todo: if you're curious about how a pre-trained model performs
     if load_weights:
         model, variables = load_model(model_type="44khz", model_bitrate="8kbps")
@@ -169,7 +171,6 @@ def create_generator(key,
         del variables
     else:
         model = DAC()
-        x = jnp.ones(shape=shape)
         subkey1, subkey2, key = random.split(key, 3)
         params = model.init({'params': subkey1, 'rng_stream': subkey2}, x)['params']
 
