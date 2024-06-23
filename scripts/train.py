@@ -32,7 +32,7 @@ assert jax.config.jax_threefry_partitionable is True
 assert jax.config.jax_default_prng_impl == 'threefry2x32'
 from jax import random, numpy as jnp
 
-from clu import metric_writers
+from clu import metric_writers, periodic_actions
 from clu.metrics import Average, Collection
 from flax.training.train_state import TrainState
 from flax.training.early_stopping import EarlyStopping
@@ -65,43 +65,6 @@ Discriminator = argbind.bind(Discriminator)
 multiscale_stft_loss = argbind.bind(multiscale_stft_loss)
 mel_spectrogram_loss = argbind.bind(mel_spectrogram_loss)
 mel_spectrogram_loss = partial(mel_spectrogram_loss, sample_rate=SAMPLE_RATE)
-
-
-# todo: This class's timed values aren't accurate because it doesn't call block_until_ready() on the last line of
-#  whatever code is in the body. In scripts/benchmark.py we do call block_until_ready()
-class TimerUtil:
-    def __init__(self):
-        """
-        Initializes the TimerUtil.
-        """
-        self.elapsed_time = 0
-        self.start_time = self.end_time = 0
-        self.num_events = 0
-
-    def __enter__(self):
-        self.elapsed_time = 0
-        self.start_time = time.time()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.end_time = time.time()
-        self.elapsed_time += self.end_time - self.start_time
-        self.num_events += 1
-
-        # Handle exceptions gracefully
-        if exc_type is not None:
-            print(f"Exception: {exc_val}")
-            return False  # Propagate exception
-        return True
-
-    def clear(self):
-        self.elapsed_time = 0
-
-    @property
-    def avg_time(self):
-        if self.num_events == 0:
-            return -1
-        return self.elapsed_time / self.num_events
 
 
 @argbind.bind()
@@ -470,8 +433,7 @@ def save_samples(rng, state: GenDiscState, audio_data):
 
 
 @argbind.bind()
-def log_training(train_metrics: MyMetrics, step: int, timers: TypedDict('Info', {'name': TimerUtil}),
-                 writer: metric_writers.MultiWriter, log_every_steps=1):
+def log_training(train_metrics: MyMetrics, step: int, writer: metric_writers.MultiWriter, log_every_steps=1):
 
     if log_every_steps and (step % log_every_steps == 0):
         summary = {}
@@ -479,8 +441,6 @@ def log_training(train_metrics: MyMetrics, step: int, timers: TypedDict('Info', 
             f'train/{k}': v.item()
             for k, v in train_metrics.unreplicate().compute().items()
         })
-        for k, timer in timers.items():
-            summary[f'sec_per/{k}'] = timer.avg_time
         writer.write_scalars(step, summary)
         writer.flush()
         # reset metrics for next logging
@@ -528,7 +488,7 @@ def train(args,
           save_path='runs',
           ):
 
-    logging.set_verbosity(logging.ERROR)  # absl logging
+    logging.set_verbosity(logging.ERROR)  # absl logging: # todo: set this to INFO but work well with tqdm
     logger.setLevel(log_level.upper())  # native python logging
 
     print(f'devices: {jax.devices()}')
@@ -604,36 +564,41 @@ def train(args,
                         metrics={best_key: jnp.inf if best_mode == 'min' else -jnp.inf})
 
     hooks = []
-    # if is_process_main():
-    #     hooks += [periodic_actions.Profile(num_profile_steps=5, logdir=workdir)]  # todo:
-
-    def make_timers():
-        return {'load_train_batch': TimerUtil(),
-                'train_step': TimerUtil(),
-                'train_metrics': TimerUtil()}
-
-    timers = make_timers()
+    # todo: the report_progress won't show up in TensorBoard because the absl logging level is set to ERROR
+    #  in order to not clash with tqdm printing.
+    report_progress = periodic_actions.ReportProgress(num_train_steps=num_iterations,
+                                                      every_secs=None,
+                                                      every_steps=1,
+                                                      writer=writer if is_process_main() else None)
+    report_progress_eval = periodic_actions.ReportProgress(num_train_steps=num_iterations,
+                                                           every_secs=None,
+                                                           every_steps=valid_freq,
+                                                           writer=writer if is_process_main() else None)
+    if is_process_main():
+        hooks += [report_progress]
+        hooks += [report_progress_eval]
+        hooks += [periodic_actions.Profile(num_profile_steps=10, logdir=workdir)]  # todo: pick num_profile_steps
 
     early_stop = EarlyStopping(min_delta=1e-3, patience=early_stop_patience)
 
     for step in tqdm.trange(1, num_iterations+1, desc='Train Steps'):
-        with timers['load_train_batch']:
+
+        with report_progress.timed("load_train_batch"):
             batch = next(train_iter)
             batch = jax_utils.replicate(batch)
 
         key, subkey = random.split(key)
 
-        with timers['train_step']:
+        with report_progress.timed("train_step"):
             state, output = train_step(split_device(subkey), state, batch)
 
-        with timers['train_metrics']:
+        with report_progress.timed("train_metrics"):
             train_metrics = compute_train_metrics(train_metrics=train_metrics, output=output)
 
         for hook in hooks:
             hook(step)
 
-        train_metrics = log_training(train_metrics, step, timers, writer)
-        timers = make_timers()
+        train_metrics = log_training(train_metrics, step, writer)
 
         if step % sample_freq == 0:
             # Note: right now save_iter is just the validation dataset.
@@ -661,7 +626,7 @@ def train(args,
                 eval_iter, _ = create_dataset(batch_size=local_val_batch_size, dtype=input_dtype)
             ran_once = False
 
-            with TimerUtil() as timer_util:
+            with report_progress_eval.timed("eval_step"):
                 for test_batch in eval_iter:  # todo: use nested tqdm here
                     ran_once = True
                     test_batch = jax_utils.replicate(test_batch)
@@ -669,7 +634,6 @@ def train(args,
                     output = eval_step(split_device(subkey), state, test_batch)
                     eval_metrics = compute_eval_metrics(eval_metrics=eval_metrics, output=output)
                 assert ran_once
-            writer.write_scalars(step, {'sec_per/eval': timer_util.elapsed_time})  # validation time cost
 
             summary, eval_metrics = log_eval(eval_metrics, step, writer)
 
@@ -678,9 +642,8 @@ def train(args,
                 logger.info(f'Met early stopping criteria, breaking at step {step}')
                 break
 
-            with TimerUtil() as timer_util:
+            with report_progress_eval.timed("checkpoint_step"):
                 save_checkpoint(checkpoint_manager, state, step, summary)
-            writer.write_scalars(step, {'sec_per/checkpoint': timer_util.elapsed_time})
 
             writer.flush()
 
