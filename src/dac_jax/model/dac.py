@@ -37,7 +37,7 @@ class DACFile:
 
     def save(self, path):
         artifacts = {
-            "codes": self.codes.astype(np.uint16),
+            "codes": np.array(self.codes).astype(np.uint16),
             "metadata": {
                 "input_db": np.array(self.input_db, dtype=jnp.float32),
                 "original_length": self.original_length,
@@ -588,7 +588,7 @@ class DAC(nn.Module):
             """
             peak = jnp.abs(audio_data).max(axis=-1, keepdims=True)
             peak_gain = jnp.ones_like(peak)
-            peak_gain = peak_gain.at[peak > max].set(max / peak[peak > max])
+            peak_gain = jnp.where(peak > max, max/peak, peak_gain)
             audio_data = audio_data * peak_gain
             return audio_data
 
@@ -641,7 +641,7 @@ class DAC(nn.Module):
             codes = codes[:, :n_quantizers, :]
 
         dac_file = DACFile(
-            codes=np.array(codes),
+            codes=codes,
             chunk_length=chunk_length,
             original_length=original_length,
             input_db=input_db,

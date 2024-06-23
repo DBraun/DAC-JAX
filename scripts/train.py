@@ -233,7 +233,7 @@ def create_discriminator(key,
 
 
 @partial(jax.pmap, axis_name='ensemble', static_broadcasted_argnums=(1,))
-def create_train_state(key, shape) -> GenDiscState:
+def create_train_state(key, shape) -> Tuple[GenDiscState, Collection, Collection]:
 
     key, subkey = random.split(key)
 
