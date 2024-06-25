@@ -13,32 +13,33 @@ import soundfile
 import librosa
 
 
-def find_files_with_extensions(directory: str, extensions: List[str], max_depth=None):
+def find_files_with_extensions(directory: str, extensions: List[str], max_depth=None, follow_symlinks=False):
     """
     Searches for files with specified extensions up to a maximum depth in the directory,
     without modifying dirs while iterating.
 
     Parameters:
     - directory (str): The path to the directory to search.
-    - extensions (list): A list of file extensions to search for.
+    - extensions (list): A list of file extensions to search for. Each extension should include a period.
     - max_depth (int): The maximum depth to search for files.
+    - follow_symlinks (bool): Whether to follow symbolic links during the search.
 
     Returns:
     - list: A list of paths to files that match the extensions within the maximum depth.
     """
     matching_files = []
-    extensions = [ext.lower() for ext in extensions]  # Normalize extensions to lowercase for matching
+    extensions_set = {ext.lower() for ext in extensions}  # Normalize extensions to lowercase for matching
     directory = os.path.abspath(directory)  # Ensure the directory path is absolute
 
     def recurse(current_dir, current_depth):
         if max_depth is not None and current_depth > max_depth:
             return
-        for item in os.listdir(current_dir):
-            item_path = os.path.join(current_dir, item)
-            if os.path.isdir(item_path):
-                recurse(item_path, current_depth + 1)
-            elif os.path.isfile(item_path) and any(item.lower().endswith(ext) for ext in extensions):
-                matching_files.append(item_path)
+        with os.scandir(current_dir) as it:
+            for entry in it:
+                if entry.is_file(follow_symlinks=follow_symlinks) and any(entry.name.lower().endswith(ext) for ext in extensions_set):
+                    matching_files.append(entry.path)
+                elif entry.is_dir(follow_symlinks=follow_symlinks):
+                    recurse(entry.path, current_depth + 1)
 
     recurse(directory, 0)
     return matching_files
