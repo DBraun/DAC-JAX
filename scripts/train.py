@@ -109,8 +109,9 @@ def create_dataset(batch_size: int, dtype=tf.float32, repeat=False, duration=0.2
 
     assert sources is not None
 
-    ds = AudioDataset(sources=sources, duration=duration, batch_size=batch_size, dtype=dtype, repeat=repeat,
-                      shuffle=shuffle, channels=channels, sample_rate=sample_rate, random_offset=bool(random_offset))
+    ds = AudioDataset(sources=sources, duration=duration, batch_size=batch_size, dtype=dtype, repeat=bool(repeat),
+                      shuffle=bool(shuffle), channels=channels, sample_rate=sample_rate,
+                      random_offset=bool(random_offset))
     ds = map(prepare_tf_data, ds)
     ds = jax_utils.prefetch_to_device(ds, size=2)  # todo: pick size
     return ds, duration
@@ -370,7 +371,7 @@ def augment_data(rng, audio_data, min_db=-16, max_db=-16):
     # note: apply target_db based on both channels
     target_db = random.uniform(rng, shape=(batch_size,), minval=min_db, maxval=max_db)
 
-    audio_data, loudness = volume_norm(audio_data, target_db, SAMPLE_RATE, filter_class="K-weighting", block_size=0.400)
+    audio_data, loudness = volume_norm(audio_data, target_db, SAMPLE_RATE, filter_class="K-weighting", block_size=.4)
 
     # note: apply different phase to each channel
     phase_angles = random.uniform(rng, shape=(batch_size, channels), minval=-jnp.pi, maxval=jnp.pi)
@@ -526,8 +527,7 @@ def train(args,
         shutil.rmtree(ckpt_dir)  # Remove any existing checkpoints from the last run.
 
     with argbind.scope(args, "train"):
-        train_iter, duration = create_dataset(batch_size=local_batch_size, dtype=input_dtype, repeat=True, shuffle=True,
-                                              random_offset=True)
+        train_iter, duration = create_dataset(batch_size=local_batch_size, dtype=input_dtype, repeat=True)
     with argbind.scope(args, "val"):
         save_iter, _ = create_dataset(batch_size=local_val_batch_size, dtype=input_dtype, repeat=True)
 
@@ -624,9 +624,9 @@ def train(args,
             with argbind.scope(args, "val"):
                 # todo: don't recreate the eval dataset multiple times
                 eval_iter, _ = create_dataset(batch_size=local_val_batch_size, dtype=input_dtype)
-            ran_once = False
 
             with report_progress_eval.timed("eval_step"):
+                ran_once = False
                 for test_batch in eval_iter:  # todo: use nested tqdm here
                     ran_once = True
                     test_batch = jax_utils.replicate(test_batch)

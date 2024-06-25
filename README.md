@@ -11,16 +11,21 @@ You can read the DAC-JAX paper [here](https://arxiv.org/abs/2405.11554).
 
 ### Installation
 
-1. Install the **CPU** version of [PyTorch](https://pytorch.org/). We strongly suggest the CPU version because trying to install a GPU version can conflict with JAX's CUDA-related installation.
-
-2. Install `audiotools` with no dependencies, since we want to avoid PyTorch again.
+1. Upgrade `pip` and `setuptools`:
     ```bash
-    pip install --no-dependencies descript-audiotools
+    pip install --upgrade pip setuptools
     ```
 
-3. Install [JAX](https://jax.readthedocs.io/en/latest/installation.html) (with GPU support).
+2. Install the **CPU** version of [PyTorch](https://pytorch.org/). We strongly suggest the CPU version because trying to install a GPU version can conflict with JAX's CUDA-related installation.
 
-4. Install DAC-JAX with one of the following:
+3. Install the **CPU** version of [TensorFlow]
+    ```bash
+    pip install tensorflow-cpu
+    ```
+
+4. Install [JAX](https://jax.readthedocs.io/en/latest/installation.html) (with GPU support).
+
+5. Install DAC-JAX with one of the following:
 
     <!-- ```
     python -m pip install dac-jax

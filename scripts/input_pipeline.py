@@ -1,9 +1,10 @@
-import logging
 import random
 import os
 from typing import List
 from pathlib import Path
 import hashlib
+
+from absl import logging
 
 import tensorflow as tf
 
@@ -63,10 +64,7 @@ class AudioDataset(tf.data.Dataset):
         key = jax.random.key(0)  # todo:
         loudness_cutoff = -40  # todo:
 
-        cond = True
-        while cond:
-            if not repeat:
-                cond = False
+        while True:
 
             if shuffle:
                 random.shuffle(file_paths)
@@ -122,6 +120,9 @@ class AudioDataset(tf.data.Dataset):
                 assert audio_data.ndim == 2
 
                 yield {'audio_data': audio_data}
+
+            if not repeat:
+                break
 
     def __new__(cls, sources: dict, duration: float, batch_size=4, dtype=tf.float32, repeat=False, shuffle=False,
                 channels=1, sample_rate=44100, random_offset=False):

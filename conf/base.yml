@@ -9,7 +9,7 @@ DAC.decoder_rates: [8, 8, 4, 2]
 DAC.n_codebooks: 9
 DAC.codebook_size: 1024
 DAC.codebook_dim: 8
-DAC.quantizer_dropout: 1.0  # note: this turns into a bool
+DAC.quantizer_dropout: 1.0  # bool
 
 # Discriminator
 Discriminator.sample_rate: 44100
@@ -76,7 +76,8 @@ augment_data.max_db: -16
 
 # Data
 train/create_dataset.duration: 0.38
-train/create_dataset.random_offset: 0.0  # todo: set this to 1.0 but then update all downstream code (AudioDataset)
+train/create_dataset.random_offset: 1.0  # bool
+train/create_dataset.shuffle: 1.0  # bool
 train/create_dataset.sources:
   speech_fb:
     - /data/daps/train
