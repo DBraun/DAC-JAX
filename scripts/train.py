@@ -2,7 +2,7 @@
 
 import os
 os.environ["XLA_FLAGS"] = (
-    # '--xla_force_host_platform_device_count=1'
+    # ' --xla_force_host_platform_device_count=2'
     ' --xla_gpu_deterministic_ops=true'  # todo: https://github.com/google/flax/discussions/3382
     # ' --xla_dump_to=tmp/xla_dump'
     )
@@ -237,8 +237,8 @@ def create_discriminator(key,
 def create_train_state(key, shape) -> Tuple[GenDiscState, Collection, Collection]:
 
     key, subkey = random.split(key)
-
     generator_state = create_generator(subkey, shape)
+
     key, subkey = random.split(key)
     discriminator_state = create_discriminator(subkey, shape)
 
