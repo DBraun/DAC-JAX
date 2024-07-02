@@ -25,12 +25,12 @@ SUPPORTED_VERSIONS = ["1.0.0"]
 
 @dataclass
 class DACFile:
-    codes: np.ndarray
+    codes: jnp.ndarray
 
     # Metadata
     chunk_length: int
     original_length: int
-    input_db: float
+    input_db: Union[float, None]
     channels: int
     sample_rate: int
     dac_version: str
@@ -39,7 +39,7 @@ class DACFile:
         artifacts = {
             "codes": np.array(self.codes).astype(np.uint16),
             "metadata": {
-                "input_db": np.array(self.input_db, dtype=jnp.float32),
+                "input_db": np.array(self.input_db, dtype=jnp.float32) if self.input_db is not None else None,
                 "original_length": self.original_length,
                 "sample_rate": self.sample_rate,
                 "chunk_length": self.chunk_length,
@@ -53,6 +53,7 @@ class DACFile:
 
     @classmethod
     def load(cls, path):
+        # todo: use safetensors instead of allow_pickle
         artifacts = jnp.load(path, allow_pickle=True)[()]
         codes = jnp.array(artifacts["codes"].astype(int))
         if artifacts["metadata"].get("dac_version", None) not in SUPPORTED_VERSIONS:
@@ -696,7 +697,8 @@ class DAC(nn.Module):
         else:
             # Normalize to original loudness
             # todo: make faster?
-            recons, _ = volume_norm(recons, obj.input_db, self.sample_rate)
+            if obj.input_db is not None:
+                recons, _ = volume_norm(recons, obj.input_db, self.sample_rate)
 
             # Resample
             recons = resample(recons, old_sr=self.sample_rate, new_sr=obj.sample_rate)
