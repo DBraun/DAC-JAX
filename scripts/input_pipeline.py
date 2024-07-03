@@ -85,7 +85,7 @@ class AudioDataset(tf.data.Dataset):
                         attempts += 1
 
                         key, subkey = jax.random.split(key)
-                        offset = jax.random.uniform(key, shape=(1,), minval=lower_bound, maxval=upper_bound).item()
+                        offset = jax.random.uniform(subkey, shape=(1,), minval=lower_bound, maxval=upper_bound).item()
                         candidate_audio_data, _ = librosa.load(
                             file_path,
                             offset=offset,
