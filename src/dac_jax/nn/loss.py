@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Optional
 from functools import partial
 import os
 
@@ -148,7 +148,7 @@ def multiscale_stft_loss(y_true: jnp.ndarray,
                          mag_weight: float = 1.0,
                          log_weight: float = 1.0,
                          pow: float = 2.0,
-                         match_stride: bool = False,
+                         match_stride: Optional[bool] = False,
                          window: str = 'hann'
                          ):
     """Computes the multiscale STFT loss from [1].
@@ -227,7 +227,7 @@ def mel_spectrogram_loss(y_true: jnp.ndarray,
                          mag_weight: float = 1.0,
                          log_weight: float = 1.0,
                          pow: float = 2.0,
-                         match_stride: bool = False,
+                         match_stride: Optional[bool] = False,
                          lower_edge_hz=None,
                          upper_edge_hz=None,
                          window: str = 'hann',

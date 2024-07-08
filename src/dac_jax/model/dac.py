@@ -1,6 +1,6 @@
 import math
 import timeit
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Optional
 from dataclasses import field, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -67,7 +67,7 @@ class ResidualUnit(nn.Module):
 
     dim: int = 16
     dilation: int = 1
-    padding: bool = field(default=True)
+    padding: Optional[bool] = field(default=True)
 
     @staticmethod
     def delay(d, L):
@@ -145,7 +145,7 @@ class Encoder(nn.Module):
     d_model: int = 64
     strides: list = field(default_factory=lambda: [2, 4, 8, 8])
     d_latent: int = 64
-    padding: bool = field(default=True)
+    padding: Optional[bool] = field(default=True)
 
     @staticmethod
     def delay(strides, L):
@@ -194,7 +194,7 @@ class DecoderBlock(nn.Module):
     input_dim: int = 16
     output_dim: int = 8
     stride: int = 1
-    padding: bool = field(default=True)
+    padding: Optional[bool] = field(default=True)
 
     @staticmethod
     def delay(s, L):
@@ -238,7 +238,7 @@ class Decoder(nn.Module):
     channels: int
     rates: List[int]
     d_out: int = 1
-    padding: bool = field(default=True)
+    padding: Optional[bool] = field(default=True)
 
     def __post_init__(self) -> None:
         assert self.rates is not None and len(self.rates)
