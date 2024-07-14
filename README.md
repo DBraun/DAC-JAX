@@ -18,14 +18,9 @@ You can read the DAC-JAX paper [here](https://arxiv.org/abs/2405.11554).
 
 2. Install the **CPU** version of [PyTorch](https://pytorch.org/). We strongly suggest the CPU version because trying to install a GPU version can conflict with JAX's CUDA-related installation.
 
-3. Install the **CPU** version of [TensorFlow](https://www.tensorflow.org/install)
-    ```bash
-    pip install tensorflow-cpu
-    ```
+3. Install [JAX](https://jax.readthedocs.io/en/latest/installation.html) (with GPU support).
 
-4. Install [JAX](https://jax.readthedocs.io/en/latest/installation.html) (with GPU support).
-
-5. Install DAC-JAX with one of the following:
+4. Install DAC-JAX with one of the following:
 
     <!-- ```
     python -m pip install dac-jax

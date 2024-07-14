@@ -227,10 +227,11 @@ def volume_norm(
     signal_duration = original_length / sample_rate
 
     if signal_duration < block_size:
-        padded_audio = jnp.pad(padded_audio, pad_width=((0, 0), (0, 0), (0, int(block_size*sample_rate)-original_length)))
+        padded_audio = jnp.pad(padded_audio,
+                               pad_width=((0, 0), (0, 0), (0, int(block_size*sample_rate)-original_length)))
 
     # create BS.1770 meter
-    meter = jln.Meter(sample_rate, filter_class=filter_class, block_size=block_size)
+    meter = jln.Meter(sample_rate, filter_class=filter_class, block_size=block_size, use_fir=True, zeros=1024)
 
     # measure loudness
     loudness = jax.vmap(meter.integrated_loudness)(rearrange(padded_audio, 'b c t -> b t c'))

@@ -1,17 +1,59 @@
-import random
 import os
-from typing import List
-from pathlib import Path
-import hashlib
+from random import Random
+from typing import List, SupportsIndex, Mapping
 
-from absl import logging
-
-import tensorflow as tf
-
+import grain.python as grain
 import jax
 import jax.numpy as jnp
-import soundfile
-import librosa
+import numpy as np
+
+from audio_tree_core import AudioTree, SaliencyParams
+
+
+class AudioDataSourceMixin:
+
+    def load_audio(self, file_path, record_key: SupportsIndex):
+
+        if self.saliency_params is not None and self.saliency_params.enabled:
+            saliency_params = self.saliency_params
+            return AudioTree.salient_excerpt(
+                file_path,
+                np.random.RandomState(int(record_key)),
+                loudness_cutoff=saliency_params.loudness_cutoff,
+                num_tries=saliency_params.num_tries,
+                sample_rate=self.sample_rate,
+                duration=self.duration,
+                mono=self.mono,
+            )
+
+        return AudioTree.from_file(
+            file_path,
+            sample_rate=self.sample_rate,
+            offset=0,
+            duration=self.duration,
+            mono=self.mono,
+        )
+
+
+class ReduceBatchTransform(grain.MapTransform):
+
+    def map(self, audio_signal: AudioTree) -> AudioTree:
+
+        def f(leaf):
+            if isinstance(leaf, np.ndarray):
+                if leaf.ndim > 1:
+                    shape = leaf.shape
+                    shape = (shape[0]*shape[1],) + shape[2:]
+                    return jnp.reshape(leaf, shape=shape)
+            return leaf
+
+        audio_signal = jax.tree_util.tree_map(f, audio_signal)
+
+        # We do this to make sample rate a scalar instead of an array.
+        # We assume that all entries of audio_signal.sample_rate are the same.
+        audio_signal = audio_signal.replace(sample_rate=audio_signal.sample_rate[0])
+
+        return audio_signal
 
 
 def find_files_with_extensions(directory: str, extensions: List[str], max_depth=None, follow_symlinks=False):
@@ -46,162 +88,227 @@ def find_files_with_extensions(directory: str, extensions: List[str], max_depth=
     return matching_files
 
 
-class AudioDataset(tf.data.Dataset):
+class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
 
-    @staticmethod
-    def _generator(folders, duration: float, shuffle: bool, sample_rate: int, channels: int,
-                   random_offset=False, repeat=False):
+    def __init__(self,
+                 sources: Mapping[str, List[str]],
+                 sample_rate: int = 44100,
+                 mono: int = 1,
+                 duration: float = 1.,
+                 extensions=None,
+                 num_steps=None,
+                 saliency_params: SaliencyParams = None,
+                 ):
 
-        # Caution: While this is a convenient approach it has limited portability and scalability.
-        # It must run in the same python process that created the generator, and is still subject to the Python GIL.
+        self.sample_rate = sample_rate
+        self.mono = bool(mono)
+        self.duration = duration
+        if extensions is None:
+            extensions = ['.wav', '.flac', '.mp3', '.mp4', '.ogg']
+        self.saliency_params = saliency_params
 
-        extensions = ['.wav', '.flac', '.mp3', '.mp4', '.ogg']
+        filepaths = []
+        for group_name, folders in sources.items():
+            for folder in folders:
+                filepaths += find_files_with_extensions(folder, extensions=extensions)
 
-        file_paths = []
-        for folder in folders:
-            file_paths += find_files_with_extensions(folder.decode('utf-8'), extensions=extensions)
+        if num_steps is not None:
+            filepaths = filepaths[:num_steps]
 
-        key = jax.random.key(0)  # todo:
-        loudness_cutoff = -40  # todo:
+        self._file_paths = filepaths
 
-        while True:
+        self._num_steps = len(filepaths)
+        assert self._num_steps > 0
 
-            if shuffle:
-                random.shuffle(file_paths)
+    def __len__(self) -> int:
+        return self._num_steps
 
-            for file_path in file_paths:
-                if random_offset:  # todo: maybe just use AudioTools here
-                    info = soundfile.info(file_path)
-                    total_duration = info.duration  # seconds
-
-                    lower_bound = 0
-                    upper_bound = max(total_duration - duration, 0)
-
-                    audio_data = jnp.zeros(shape=(channels, round(duration*sample_rate)))
-                    best_loudness = -jnp.inf
-                    attempts = 0
-                    max_attempts = 100
-                    while (best_loudness < loudness_cutoff) and attempts < max_attempts:
-                        attempts += 1
-
-                        key, subkey = jax.random.split(key)
-                        offset = jax.random.uniform(subkey, shape=(1,), minval=lower_bound, maxval=upper_bound).item()
-                        candidate_audio_data, _ = librosa.load(
-                            file_path,
-                            offset=offset,
-                            duration=duration,
-                            sr=sample_rate,
-                            mono=False,
-                        )
-
-                        # Calculate the peak amplitude based on the raw audio file
-                        peak_amplitude = jnp.max(jnp.abs(candidate_audio_data))
-
-                        # Convert peak amplitude to dBFS
-                        dBFS = 20 * jnp.log10(peak_amplitude)
-
-                        if dBFS > best_loudness:
-                            best_loudness = dBFS
-                            audio_data = candidate_audio_data
-
-                        if attempts == max_attempts:
-                            logging.warning(f'Struggled to find salient audio section for file: {file_path}')
-                            continue
-                else:
-                    audio_data, _ = librosa.load(file_path, sr=sample_rate, mono=False, duration=duration)
-
-                if audio_data.ndim < 2:
-                    audio_data = jnp.expand_dims(audio_data, axis=0)
-
-                if audio_data.shape[-1] < round(duration*sample_rate):
-                    pad_right = round(duration*sample_rate) - audio_data.shape[-1]
-                    audio_data = jnp.pad(audio_data, ((0, 0), (0, int(pad_right))))
-
-                assert audio_data.ndim == 2
-
-                yield {'audio_data': audio_data}
-
-            if not repeat:
-                break
-
-    def __new__(cls, sources: dict, duration: float, batch_size=4, dtype=tf.float32, repeat=False, shuffle=False,
-                channels=1, sample_rate=44100, random_offset=False):
-
-        assert sources is not None, \
-            "You must specify a sources as a dictionary mapping labels to lists of directories."
-
-        dur_samples = round(duration * sample_rate)
-
-        output_signature = tf.TensorSpec(shape=(channels, dur_samples), dtype=dtype)
-
-        datasets = []
-        for label, folders in sources.items():
-            dataset = tf.data.Dataset.from_generator(
-                cls._generator,
-                output_signature={'audio_data': output_signature},
-                args=(folders, duration, shuffle, sample_rate, channels, random_offset, repeat)
-            )
-            datasets.append(dataset)
-
-        weights = None  # uniform distribution
-        dataset = tf.data.Dataset.sample_from_datasets(datasets, weights=weights, rerandomize_each_iteration=shuffle)
-        del datasets
-
-        def convert_dtype(example):
-            example = example.to(dtype)
-            return example
-
-        # dataset = dataset.map(convert_dtype)  # todo:
-        # dataset = dataset.map(convert_dtype, num_parallel_calls=tf.data.experimental.AUTOTUNE)  # todo:
-
-        dataset = dataset.batch(batch_size, drop_remainder=True)
-
-        # hashed = hashlib.sha1(';'.join(sources).encode()).hexdigest()
-        # cache_dir = str(Path("dataset_cache") / hashed)
-        # os.makedirs(cache_dir, exist_ok=True)
-        # cache_path = os.path.join(cache_dir, "cache")
-        # dataset = dataset.cache(cache_path)  # todo:
-
-        dataset = dataset.prefetch(tf.data.AUTOTUNE)
-
-        return dataset
+    def __getitem__(self, record_key: SupportsIndex):
+        file_path = self._file_paths[record_key]
+        return self.load_audio(file_path, record_key)
 
 
-def test_simple(folder):
+class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
 
-    duration = 4  # seconds
+    # todo: make this algorithm work if the user specifies weights for the groups.
+    #  Right now the groups are balanced uniformly.
 
-    sources = {
-        'foo': [folder, folder, folder]
-    }
+    def __init__(self,
+                 sources: Mapping[str, List[str]],
+                 num_steps: int,
+                 sample_rate: int = 44100,
+                 mono: int = 1,
+                 duration: float = 1.,
+                 extensions=None,
+                 saliency_params: SaliencyParams = None,
+                 ):
 
-    dataset = AudioDataset(sources=sources, duration=duration, batch_size=4)
+        self.sample_rate = sample_rate
+        self.mono = bool(mono)
+        self.duration = duration
+        if extensions is None:
+            extensions = ['.wav', '.flac', '.mp3', '.mp4', '.ogg']
+        self.saliency_params = saliency_params
 
-    i = 0
-    for item in dataset:
-        i += 1
-        if i > 10:
-            break
+        groups = []
+
+        for group_name, folders in sources.items():
+            filepaths = []
+            for folder in folders:
+                filepaths += find_files_with_extensions(folder, extensions=extensions)
+
+            if filepaths:
+                groups.append(filepaths)
+            else:
+                raise RuntimeError(f"Group '{group_name}' is empty. "
+                                   f"The number of specified folders was {len(folders)}.")
+
+        self._group_to_len = {i: len(group) for i, group in enumerate(groups)}
+        self._groups = groups
+        self._num_groups = len(groups)
+        self._num_steps = num_steps
+        assert self._num_steps > 0
+
+    def __len__(self) -> int:
+        return self._num_steps
+
+    def __getitem__(self, record_key: SupportsIndex):
+        record_key = int(record_key)
+
+        group_idx = record_key % self._num_groups
+
+        idx = record_key // self._num_groups
+
+        x = idx % self._group_to_len[group_idx]
+        y = idx // self._group_to_len[group_idx]
+
+        group = self._groups[group_idx].copy()
+
+        Random(y+4617*group_idx).shuffle(group)  # todo: 4617 is arbitrary and could probably be zero.
+
+        file_path = group[x]
+
+        return self.load_audio(file_path, record_key)
+
+
+def create_audio_dataset(
+        sources: Mapping[str, List[str]],
+        duration: float = 1.,
+        train: int = 1,
+        batch_size: int = 4,
+        sample_rate: int = 44100,
+        mono: int = 1,
+        seed: int = 0,
+        num_steps=None,
+        extensions=None,
+        worker_count: int = 0,
+        worker_buffer_size: int = 1,
+        transforms=None,
+        saliency_params: SaliencyParams = None,
+):
+
+    if train:
+        assert num_steps is not None and num_steps > 0
+
+        datasource = AudioDataBalancedSource(
+            sources=sources,
+            num_steps=num_steps*batch_size,
+            sample_rate=sample_rate,
+            mono=mono,
+            duration=duration,
+            extensions=extensions,
+            saliency_params=saliency_params,
+        )
+    else:
+        assert num_steps is None, "Train is False but num_steps is also None"
+        datasource = AudioDataSimpleSource(
+            sources=sources,
+            sample_rate=sample_rate,
+            mono=mono,
+            duration=duration,
+            extensions=extensions,
+        )
+
+    index_sampler = grain.IndexSampler(
+      num_records=len(datasource),
+      num_epochs=1,
+      shard_options=grain.NoSharding(),
+      shuffle=False,  # Keep shuffling off. AudioDataBalancedSource already does the shuffling deterministically,
+                      #  and AudioDataSimpleSource doesn't need shuffling.
+      seed=seed,
+    )
+
+    if transforms is None:
+        transforms = []
+
+    pygrain_ops = [
+        grain.Batch(batch_size=batch_size, drop_remainder=True),
+        ReduceBatchTransform(),
+        *transforms,
+    ]
+
+    batched_dataloader = grain.DataLoader(
+        data_source=datasource,
+        sampler=index_sampler,
+        operations=pygrain_ops,
+        worker_count=worker_count,
+        worker_buffer_size=worker_buffer_size,
+        enable_profiling=False,
+    )
+    return batched_dataloader
 
 
 if __name__ == '__main__':
 
-    import argparse
+    from tqdm import tqdm
+    from data_transforms import VolumeTransform, RescaleAudioTransform, SwapStereoAudioTransform, InvertPhaseAudioTransform
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--folder', type=str, required=True)
+    sources = {
+        'a': ['/mnt/c/users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Bass-Bass3-bass-10-syx-01-SUPERBASS2-note69'],
+        'b': ['/mnt/c/Users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Accordion-ACCORD01-SYX-06-AKKORDEON-note69'],
+    }
 
-    args = parser.parse_args()
+    num_steps = 1000
 
-    tf.config.experimental.set_visible_devices([], 'GPU')
+    ds = create_audio_dataset(
+        sources=sources,
+        duration=0.5,
+        train=True,
+        batch_size=32,
+        sample_rate=44100,
+        mono=True,
+        seed=0,
+        num_steps=num_steps,
+        extensions=None,
+        worker_count=0,
+        worker_buffer_size=1,
+        transforms=[
+            VolumeTransform(),
+            RescaleAudioTransform(),
+            SwapStereoAudioTransform(),
+            InvertPhaseAudioTransform(),
+        ],
+        # saliency_params=SaliencyParams(True, 20, -70),
+    )
 
-    import sys
-    import traceback
-    import pdb
+    from absl import logging
 
-    try:
-        test_simple(args.folder)
-    except:
-        extype, value, tb = sys.exc_info()
-        traceback.print_exc()
-        pdb.post_mortem()
+    logging.set_verbosity(logging.INFO)
+
+    for x in tqdm(ds, total=num_steps, desc='Grain Dataset'):
+        # print(x)
+        pass
+        # print('i')
+        # print(np.array(x))
+        # if i > 20:
+        #     break
+
+    pass
+
+    # audio_data, _ = librosa.load('/mnt/c/users/braun/Downloads/transformer_test/Think 3-162.wav', sr=44100, mono=True, duration=0.5)
+    #
+    # while audio_data.ndim < 3:
+    #     audio_data = jnp.expand_dims(audio_data, axis=0)
+    #
+    # for _ in tqdm(range(100), total=100, desc='Test dataset'):
+    #     dac_file = dac_model.compress(compress_chunk, audio_data, 44100, win_duration=WIN_DURATION, normalize_db=None)
