@@ -117,7 +117,7 @@ def create_dataset(
             VolumeTransform(),
             RescaleAudioTransform(),
             PhaseShiftAudioTransform(),
-            SwapStereoAudioTransform(),
+            # SwapStereoAudioTransform(),
             InvertPhaseAudioTransform(),
         ]
     else:
@@ -199,7 +199,7 @@ def create_generator_optimizer(
         adam_b1: float = 0.9,
         adam_b2: float = 0.999,
         adam_weight_decay: float = .01,
-        grad_clip: float = 1e3,
+        grad_clip: float = 1,
 ):
     # Combining gradient transforms using `optax.chain`.
     gradient_transform = optax.chain(
@@ -265,7 +265,7 @@ def create_discriminator_optimizer(
         adam_b1: float = 0.9,
         adam_b2: float = 0.999,
         adam_weight_decay: float = .01,
-        grad_clip: float = 10,
+        grad_clip: float = 1,
 ):
     gradient_transform = optax.chain(
         optax.clip_by_global_norm(float(grad_clip)),

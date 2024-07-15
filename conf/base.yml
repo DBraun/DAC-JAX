@@ -29,14 +29,14 @@ create_generator_scheduler.lr_gamma: 0.999996
 
 create_generator_optimizer.adam_b1: 0.8
 create_generator_optimizer.adam_b2: 0.99
-create_generator_optimizer.learning_rate: 1e-4
+create_generator_optimizer.grad_clip: 1e3
 
 create_discriminator_scheduler.learning_rate: 1e-4
 create_discriminator_scheduler.lr_gamma: 0.999996
 
 create_discriminator_optimizer.adam_b1: 0.8
 create_discriminator_optimizer.adam_b2: 0.99
-create_discriminator_optimizer.learning_rate: 1e-4
+create_discriminator_optimizer.grad_clip: 10
 
 lambdas:
   mel/loss: 15.0
@@ -83,6 +83,9 @@ train/SaliencyParams.loudness_cutoff: -40
 
 # Data
 train/create_dataset.duration: 0.38
+val/create_dataset.duration: 5.0
+test/create_dataset.duration: 10.0
+
 train/create_dataset.sources:
   speech_fb:
     - /data/daps/train
@@ -105,7 +108,6 @@ train/create_dataset.sources:
     - /data/audioset/data/unbalanced_train_segments/
     - /data/audioset/data/balanced_train_segments/
 
-val/create_dataset.duration: 5.0
 val/create_dataset.sources:
   speech_hq:
     - /data/daps/val
@@ -114,7 +116,6 @@ val/create_dataset.sources:
   general:
     - /data/audioset/data/eval_segments/
 
-test/create_dataset.duration: 10.0
 test/create_dataset.sources:
   speech_hq:
     - /data/daps/test
