@@ -243,26 +243,6 @@ def volume_norm(
     return audio_data, loudness
 
 
-def phase_shift(
-        audio_data: jnp.ndarray,
-        amt: jnp.ndarray,  # -jnp.pi to jnp.pi
-):
-    length = audio_data.shape[2]
-    hop_factor = 0.5
-    frame_length = 2048
-    window = 'hann'
-
-    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, match_stride=False,
-                       padding_type='reflect')
-    istft_fun = partial(istft, window=window, length=length)
-
-    stft_data = stft_fun(audio_data)
-    stft_data = stft_data * jnp.exp(1j * amt)[:, None, None]
-    audio_data = istft_fun(stft_data)
-
-    return audio_data
-
-
 def rescale_audio(audio_data: jnp.ndarray) -> jnp.ndarray:
     """Rescales audio to the range [-1, 1] only if the original audio exceeds those bounds. Useful if transforms have
     caused the audio to clip. It won't change the relative balance of multichannel audio."""

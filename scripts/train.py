@@ -46,7 +46,8 @@ from dac_jax.model import DAC, Discriminator
 from dac_jax import load_model
 
 from audio_tree_core import AudioTree
-from data_transforms import VolumeTransform, RescaleAudioTransform, SwapStereoAudioTransform, InvertPhaseAudioTransform
+from data_transforms import (VolumeTransform, RescaleAudioTransform, SwapStereoAudioTransform,
+                             InvertPhaseAudioTransform, PhaseShiftAudioTransform)
 from input_pipeline import create_audio_dataset, SaliencyParams
 
 warnings.filterwarnings("ignore", category=UserWarning)  # ignore librosa warnings about mel filters
@@ -58,7 +59,7 @@ VolumeTransform = argbind.bind(VolumeTransform)
 RescaleAudioTransform = argbind.bind(RescaleAudioTransform)
 SwapStereoAudioTransform = argbind.bind(SwapStereoAudioTransform)
 InvertPhaseAudioTransform = argbind.bind(InvertPhaseAudioTransform)
-# PhaseShiftAudioTransform = argbind.bind(PhaseShiftAudioTransform)  # todo:
+PhaseShiftAudioTransform = argbind.bind(PhaseShiftAudioTransform)
 
 SAMPLE_RATE = 44100  # todo: get from config file
 
@@ -115,9 +116,9 @@ def create_dataset(
         transforms += [
             VolumeTransform(),
             RescaleAudioTransform(),
+            PhaseShiftAudioTransform(),
             SwapStereoAudioTransform(),
             InvertPhaseAudioTransform(),
-            # todo: need phase shift transform
         ]
     else:
         pass

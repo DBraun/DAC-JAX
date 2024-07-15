@@ -7,6 +7,8 @@ import numpy as np
 
 import grain.python as grain
 
+from dac_jax.audio_utils import stft, istft
+
 from audio_tree_core import AudioTree
 
 
@@ -65,7 +67,7 @@ class RescaleAudioTransform(grain.MapTransform):
 
 
 @partial(jax.jit, donate_argnums=0)
-def _invert_phase_audio_transform(audio_tree: AudioTree, rng: jnp.ndarray, p) -> AudioTree:
+def _invert_phase_audio_transform(audio_tree: AudioTree, rng: jnp.ndarray, p: float) -> AudioTree:
     audio_data = audio_tree.audio_data
 
     B = audio_data.shape[0]
@@ -99,7 +101,7 @@ class InvertPhaseAudioTransform(grain.RandomMapTransform):
 
 
 @partial(jax.jit, donate_argnames='audio_tree')
-def _swap_stereo_audio_transform(audio_tree: AudioTree, rng: jnp.ndarray, p) -> AudioTree:
+def _swap_stereo_audio_transform(audio_tree: AudioTree, rng: jnp.ndarray, p: float) -> AudioTree:
     audio_data = audio_tree.audio_data
 
     B = audio_data.shape[0]
@@ -131,3 +133,53 @@ class SwapStereoAudioTransform(grain.RandomMapTransform):
 
         rng = random.key(rng.integers(2 ** 63))
         return _swap_stereo_audio_transform(audio_tree, rng, self.p)
+
+
+@partial(jax.jit, donate_argnums=0, static_argnums=(2, 3, 4))
+def _phase_shift(
+        audio_tree: AudioTree,
+        rng: jnp.ndarray,
+        p: float,
+        hop_factor: float = 0.5,
+        frame_length: float = 2048,
+        window: str = 'hann',
+):
+    audio_data = audio_tree.audio_data
+    B, C, length = audio_data.shape
+
+    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, match_stride=False,
+                       padding_type='reflect')
+    istft_fun = partial(istft, window=window, length=length)
+
+    stft_data = stft_fun(audio_data)
+
+    amt = random.uniform(rng, shape=stft_data.shape[:-1], minval=-jnp.pi, maxval=jnp.pi)
+
+    stft_data = stft_data * jnp.expand_dims(jnp.exp(1j * amt), axis=-1)
+    shifted = istft_fun(stft_data)
+
+    do_swap = random.uniform(rng, shape=(B,), minval=0) < p
+    do_swap = jnp.expand_dims(do_swap, axis=(1, 2))
+
+    audio_data = jnp.where(do_swap, shifted, audio_data)
+
+    return audio_tree.replace(audio_data=audio_data)
+
+
+class PhaseShiftAudioTransform(grain.RandomMapTransform):
+
+    def __init__(self, p: float = 0):
+        """
+        With a probability ``p``, perform a phase shift on the audio
+
+        :param p: The probability between 0 and 1 of swapping stereo channels.
+        """
+        assert 0 <= p <= 1
+        self.p = p
+
+    def random_map(self, audio_tree: AudioTree, rng: np.random.Generator) -> AudioTree:
+        if self.p == 0:
+            return audio_tree
+
+        rng = random.key(rng.integers(2 ** 63))
+        return _phase_shift(audio_tree, rng, self.p)

@@ -74,6 +74,7 @@ VolumeTransform.min_db: -16
 VolumeTransform.max_db: -16
 SwapStereoAudioTransform.p: 0.1
 InvertPhaseAudioTransform.p: 0.1
+PhaseShiftAudioTransform.p: 0.1
 
 # Data
 train/SaliencyParams.enabled: 0
