@@ -304,8 +304,9 @@ def create_discriminator(
 
 
 @partial(jax.pmap, axis_name='ensemble', donate_argnums=3)
-@argbind.bind()
-def eval_step(rng, state: GenDiscState, audio_tree: AudioTree, eval_metrics, lambdas=None) -> EvalMetrics:
+@argbind.bind(without_prefix=True)
+def eval_step(rng, state: GenDiscState, audio_tree: AudioTree, eval_metrics, lambdas: Mapping[str, float] = None)\
+        -> EvalMetrics:
 
     assert lambdas is not None
 
@@ -363,8 +364,11 @@ def train_step_discriminator(state: GenDiscState, audio_data, output) -> Tuple[G
     return state, loss
 
 
-@argbind.bind()
-def train_step_generator(rng, state: GenDiscState, audio_data, lambdas=None) -> Tuple[GenDiscState, dict]:
+@argbind.bind(without_prefix=True)
+def train_step_generator(rng, state: GenDiscState, audio_data, lambdas: Mapping[str, float] = None) ->\
+        Tuple[GenDiscState, dict]:
+
+    assert lambdas is not None
 
     def loss_fn(params):
 

@@ -10,14 +10,7 @@ mel_spectrogram_loss.pow: 1.0
 mel_spectrogram_loss.clamp_eps: 1.0e-5
 mel_spectrogram_loss.mag_weight: 0.0
 
-train_step_generator.lambdas:
-  mel/loss: 100.0
-  adv/feat_loss: 2.0
-  adv/gen_loss: 1.0
-  vq/commitment_loss: 0.25
-  vq/codebook_loss: 1.0
-
-eval_step.lambdas:
+lambdas:
   mel/loss: 100.0
   adv/feat_loss: 2.0
   adv/gen_loss: 1.0
