@@ -1,7 +1,6 @@
 import math
 from typing import Optional, Union, Tuple, List
 from pathlib import Path
-from functools import partial
 import glob
 
 import chex
@@ -180,6 +179,7 @@ def volume_norm(
         filter_class: str = "K-weighting",
         block_size: float = 0.400,
         min_loudness: float = -70,
+        zeros: int = 2048,
 ):
     """Calculates loudness using an implementation of ITU-R BS.1770-4.
     Allows control over gating block size and frequency weighting filters for
@@ -210,6 +210,8 @@ def volume_norm(
         Gating block size in seconds, by default 0.400
     min_loudness : float, optional
         Minimum loudness in decibels
+    zeros : int, optional
+        The length of the FIR filter. You should pick a power of 2 between 512 and 4096.
 
     Returns
     -------
@@ -231,7 +233,7 @@ def volume_norm(
                                pad_width=((0, 0), (0, 0), (0, int(block_size*sample_rate)-original_length)))
 
     # create BS.1770 meter
-    meter = jln.Meter(sample_rate, filter_class=filter_class, block_size=block_size, use_fir=True, zeros=1024)
+    meter = jln.Meter(sample_rate, filter_class=filter_class, block_size=block_size, use_fir=True, zeros=zeros)
 
     # measure loudness
     loudness = jax.vmap(meter.integrated_loudness)(rearrange(padded_audio, 'b c t -> b t c'))
@@ -241,12 +243,3 @@ def volume_norm(
     audio_data = audio_data * db2linear(target_db-loudness)[:, None, None]
 
     return audio_data, loudness
-
-
-def rescale_audio(audio_data: jnp.ndarray) -> jnp.ndarray:
-    """Rescales audio to the range [-1, 1] only if the original audio exceeds those bounds. Useful if transforms have
-    caused the audio to clip. It won't change the relative balance of multichannel audio."""
-    maxes = jnp.max(jnp.absolute(audio_data), axis=[-2, -1], keepdims=True)
-    maxes = jnp.maximum(maxes, jnp.ones_like(maxes))
-    audio_data = audio_data / maxes
-    return audio_data

@@ -9,7 +9,7 @@ DAC.decoder_rates: [8, 8, 4, 2]
 DAC.n_codebooks: 9
 DAC.codebook_size: 1024
 DAC.codebook_dim: 8
-DAC.quantizer_dropout: 1.0  # bool
+DAC.quantizer_dropout: 1.0
 
 # Discriminator
 Discriminator.sample_rate: 44100
@@ -23,16 +23,17 @@ Discriminator.bands:
   - [0.5, 0.75]
   - [0.75, 1.0]
 
-# Optimization
+# Schedules
 create_generator_scheduler.learning_rate: 1e-4
 create_generator_scheduler.lr_gamma: 0.999996
 
+create_discriminator_scheduler.learning_rate: 1e-4
+create_discriminator_scheduler.lr_gamma: 0.999996
+
+# Optimization
 create_generator_optimizer.adam_b1: 0.8
 create_generator_optimizer.adam_b2: 0.99
 create_generator_optimizer.grad_clip: 1e3
-
-create_discriminator_scheduler.learning_rate: 1e-4
-create_discriminator_scheduler.lr_gamma: 0.999996
 
 create_discriminator_optimizer.adam_b1: 0.8
 create_discriminator_optimizer.adam_b2: 0.99
@@ -53,7 +54,7 @@ train.sample_freq: 10000
 train.early_stop_patience: 4
 train.ckpt_max_keep: 4
 train.seed: 0
-train.tabulate: 0
+train.tabulate: 1
 
 log_training.log_every_steps: 10
 
@@ -69,15 +70,20 @@ mel_spectrogram_loss.clamp_eps: 1.0e-5
 mel_spectrogram_loss.mag_weight: 0.0
 
 # Data Augmentation
-VolumeTransform.enabled: 1
-VolumeTransform.min_db: -16
-VolumeTransform.max_db: -16
-SwapStereoAudioTransform.p: 0.1
-InvertPhaseAudioTransform.p: 0.1
-PhaseShiftAudioTransform.p: 0.1
+VolumeNorm.min_db: -16
+VolumeNorm.max_db: -16
+
+train/build_transforms.augment:
+  - VolumeNorm
+  - RescaleAudio
+  - ShiftPhase
+
+val/build_transforms.augment:
+  - VolumeNorm
+  - RescaleAudio
 
 # Data
-train/SaliencyParams.enabled: 0
+train/SaliencyParams.enabled: 1
 train/SaliencyParams.num_tries: 8
 train/SaliencyParams.loudness_cutoff: -40
 

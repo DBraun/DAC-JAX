@@ -90,15 +90,16 @@ def find_files_with_extensions(directory: str, extensions: List[str], max_depth=
 
 class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
 
-    def __init__(self,
-                 sources: Mapping[str, List[str]],
-                 sample_rate: int = 44100,
-                 mono: int = 1,
-                 duration: float = 1.,
-                 extensions=None,
-                 num_steps=None,
-                 saliency_params: SaliencyParams = None,
-                 ):
+    def __init__(
+            self,
+            sources: Mapping[str, List[str]],
+            sample_rate: int = 44100,
+            mono: int = 1,
+            duration: float = 1.,
+            extensions=None,
+            num_steps=None,
+            saliency_params: SaliencyParams = None,
+    ):
 
         self.sample_rate = sample_rate
         self.mono = bool(mono)
@@ -133,15 +134,16 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
     # todo: make this algorithm work if the user specifies weights for the groups.
     #  Right now the groups are balanced uniformly.
 
-    def __init__(self,
-                 sources: Mapping[str, List[str]],
-                 num_steps: int,
-                 sample_rate: int = 44100,
-                 mono: int = 1,
-                 duration: float = 1.,
-                 extensions=None,
-                 saliency_params: SaliencyParams = None,
-                 ):
+    def __init__(
+            self,
+            sources: Mapping[str, List[str]],
+            num_steps: int,
+            sample_rate: int = 44100,
+            mono: int = 1,
+            duration: float = 1.,
+            extensions=None,
+            saliency_params: SaliencyParams = None,
+    ):
 
         self.sample_rate = sample_rate
         self.mono = bool(mono)
@@ -261,11 +263,17 @@ def create_audio_dataset(
 if __name__ == '__main__':
 
     from tqdm import tqdm
-    from data_transforms import VolumeTransform, RescaleAudioTransform, SwapStereoAudioTransform, InvertPhaseAudioTransform
+    from data_transforms import VolumeNorm, RescaleAudio, SwapStereo, InvertPhase
+    from absl import logging
+
+    logging.set_verbosity(logging.INFO)
+
+    folder1 = '/mnt/c/users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Bass-Bass3-bass-10-syx-01-SUPERBASS2-note69'
+    folder2 = '/mnt/c/Users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Accordion-ACCORD01-SYX-06-AKKORDEON-note69'
 
     sources = {
-        'a': ['/mnt/c/users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Bass-Bass3-bass-10-syx-01-SUPERBASS2-note69'],
-        'b': ['/mnt/c/Users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Accordion-ACCORD01-SYX-06-AKKORDEON-note69'],
+        'a': [folder1],
+        'b': [folder2],
     }
 
     num_steps = 1000
@@ -283,32 +291,13 @@ if __name__ == '__main__':
         worker_count=0,
         worker_buffer_size=1,
         transforms=[
-            VolumeTransform(),
-            RescaleAudioTransform(),
-            SwapStereoAudioTransform(),
-            InvertPhaseAudioTransform(),
+            VolumeNorm(),
+            RescaleAudio(),
+            SwapStereo(),
+            InvertPhase(),
         ],
-        # saliency_params=SaliencyParams(True, 20, -70),
+        saliency_params=SaliencyParams(False, 8, -70),
     )
 
-    from absl import logging
-
-    logging.set_verbosity(logging.INFO)
-
     for x in tqdm(ds, total=num_steps, desc='Grain Dataset'):
-        # print(x)
         pass
-        # print('i')
-        # print(np.array(x))
-        # if i > 20:
-        #     break
-
-    pass
-
-    # audio_data, _ = librosa.load('/mnt/c/users/braun/Downloads/transformer_test/Think 3-162.wav', sr=44100, mono=True, duration=0.5)
-    #
-    # while audio_data.ndim < 3:
-    #     audio_data = jnp.expand_dims(audio_data, axis=0)
-    #
-    # for _ in tqdm(range(100), total=100, desc='Test dataset'):
-    #     dac_file = dac_model.compress(compress_chunk, audio_data, 44100, win_duration=WIN_DURATION, normalize_db=None)

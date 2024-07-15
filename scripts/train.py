@@ -46,26 +46,24 @@ from dac_jax.model import DAC, Discriminator
 from dac_jax import load_model
 
 from audio_tree_core import AudioTree
-from data_transforms import (VolumeTransform, RescaleAudioTransform, SwapStereoAudioTransform,
-                             InvertPhaseAudioTransform, PhaseShiftAudioTransform)
 from input_pipeline import create_audio_dataset, SaliencyParams
+import data_transforms
 
 warnings.filterwarnings("ignore", category=UserWarning)  # ignore librosa warnings about mel filters
 
-SaliencyParams = argbind.bind(SaliencyParams)
+SaliencyParams = argbind.bind(SaliencyParams, "train", "val")
 
 # Transforms
-VolumeTransform = argbind.bind(VolumeTransform)
-RescaleAudioTransform = argbind.bind(RescaleAudioTransform)
-SwapStereoAudioTransform = argbind.bind(SwapStereoAudioTransform)
-InvertPhaseAudioTransform = argbind.bind(InvertPhaseAudioTransform)
-PhaseShiftAudioTransform = argbind.bind(PhaseShiftAudioTransform)
-
-SAMPLE_RATE = 44100  # todo: get from config file
+def filter_fn(fn):
+    return (fn.__qualname__ != 'TfRandomMapTransform' and
+            (hasattr(fn, 'random_map') or hasattr(fn, 'map') or hasattr(fn, 'np_random_map')))
+tfm = argbind.bind_module(data_transforms, "train", "val", filter_fn=filter_fn)
 
 # Models
 DAC = argbind.bind(DAC)
 Discriminator = argbind.bind(Discriminator)
+
+SAMPLE_RATE = DAC().sample_rate
 
 # Losses
 multiscale_stft_loss = argbind.bind(multiscale_stft_loss)
@@ -98,38 +96,43 @@ def is_process_main():
 
 
 @argbind.bind('train', 'val', 'test')
+def build_transforms(
+        augment: list[str] = None,
+):
+    def to_transform_instances(transform_classes):
+        if transform_classes is None:
+            return None
+        instances = []
+        for TransformClass in transform_classes:
+            instance = getattr(tfm, TransformClass)()
+            instances.append(instance)
+        return instances
+
+    return to_transform_instances(augment)
+
+
+@argbind.bind('train', 'val', 'test')
 def create_dataset(
-        seed: int,
+        transforms: list,
         batch_size: int,
         duration=0.2,
         sources: Mapping[str, List[str]] = None,
         mono: int = 1,
-        sample_rate: int = SAMPLE_RATE,
         train: int = 0,
-        num_steps: int = None
+        num_steps: int = None,
+        seed: int = 0,
 ) -> Tuple[grain.DataLoader, float]:
 
     assert sources is not None
 
-    transforms = []
-    if train:
-        transforms += [
-            VolumeTransform(),
-            RescaleAudioTransform(),
-            PhaseShiftAudioTransform(),
-            # SwapStereoAudioTransform(),
-            InvertPhaseAudioTransform(),
-        ]
-    else:
-        pass
-        # todo: which augmentations to do on validation/test?
+    saliency_params = SaliencyParams()
 
     ds = create_audio_dataset(
         sources=sources,
         duration=duration,
         train=train,
         batch_size=batch_size,
-        sample_rate=sample_rate,
+        sample_rate=SAMPLE_RATE,
         mono=mono,
         seed=seed,
         num_steps=num_steps,
@@ -137,7 +140,7 @@ def create_dataset(
         worker_count=0,  # todo:
         worker_buffer_size=1,  # todo:
         transforms=transforms,
-        saliency_params=SaliencyParams(),
+        saliency_params=saliency_params,
     )
 
     # ds = jax_utils.prefetch_to_device(ds, size=2)  # todo:
@@ -533,9 +536,12 @@ def train(
         shutil.rmtree(ckpt_dir)  # Remove any existing checkpoints from the last run.
 
     with argbind.scope(args, "train"):
-        train_iter, duration = create_dataset(seed, batch_size=local_batch_size, train=True, num_steps=num_iterations)
+        transforms = build_transforms()
+        train_iter, duration = create_dataset(transforms, batch_size=local_batch_size, train=True,
+                                              num_steps=num_iterations)
     with argbind.scope(args, "val"):
-        save_iter, _ = create_dataset(seed, batch_size=local_val_batch_size)
+        transforms = build_transforms()
+        save_iter, _ = create_dataset(transforms, batch_size=local_val_batch_size)
 
     n_channels = 1
     shape = (local_batch_size, n_channels, round(SAMPLE_RATE * duration))
@@ -641,7 +647,8 @@ def train(
 
                     with argbind.scope(args, "val"):
                         # todo: don't recreate the eval dataset multiple times
-                        eval_iter, _ = create_dataset(seed, batch_size=local_val_batch_size)
+                        transforms = build_transforms()
+                        eval_iter, _ = create_dataset(transforms, batch_size=local_val_batch_size)
 
                     ran_once = False
                     for test_batch in eval_iter:  # todo: use nested tqdm here
