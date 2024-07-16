@@ -5,7 +5,6 @@ specifically,
 https://github.com/descriptinc/audiotools/blob/master/audiotools/core/audio_signal.py
 """
 
-from dataclasses import field
 from functools import partial
 from pathlib import Path
 from typing import Union
@@ -18,13 +17,6 @@ import jaxloudnorm as jln
 import librosa
 import numpy as np
 import soundfile
-
-
-@struct.dataclass
-class SaliencyParams:
-    enabled: bool = field(default=False)
-    num_tries: int = 8
-    loudness_cutoff: float = -40
 
 
 @partial(jax.jit, static_argnames=('sample_rate', 'zeros'))

@@ -393,7 +393,6 @@ class DAC(nn.Module):
             "length" : int
                 Number of samples in input audio
         """
-        assert self.padding, "Padding must be enabled in order to run ``encode``."
         z = self.encoder(audio_data)
         z, codes, latents, commitment_loss, codebook_loss = self.quantizer(
             z, n_quantizers, train=train
@@ -458,7 +457,6 @@ class DAC(nn.Module):
         "audio" : jnp.ndarray[B x 1 x length]
             Decoded audio data.
         """
-        assert self.padding, "Padding must be enabled in order to run ``encode``."
         audio = self.decoder(z)
         if length is not None:
             audio = audio[..., :length]

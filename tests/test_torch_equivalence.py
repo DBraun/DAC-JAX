@@ -1,11 +1,21 @@
-import dac as dac_torch
-from audiotools import AudioSignal
-import torch
-import librosa
+import os
+os.environ["XLA_FLAGS"] = (
+    ' --xla_gpu_deterministic_ops=true'  # todo: https://github.com/google/flax/discussions/3382
+)
+os.environ["TF_CUDNN_DETERMINISTIC"] = '1'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-import numpy as np
+import torch
+torch.use_deterministic_algorithms(True)
+
 import jax
 import jax.numpy as jnp
+
+import dac as dac_torch
+from audiotools import AudioSignal
+
+import librosa
+import numpy as np
 
 import dac_jax
 
@@ -71,7 +81,8 @@ def _jax_padding(np_data) -> dict[np.array]:
 
 def _jax_compress(np_data, win_duration: float):
 
-    model, variables = dac_jax.load_model(model_type='44khz', padding=False)  # set padding to False since we're doing compress
+    # set padding to False since we're doing compress
+    model, variables = dac_jax.load_model(model_type='44khz', padding=False)
     sample_rate = 44100
 
     @jax.jit
@@ -119,7 +130,10 @@ def test_equivalence_padding():
     assert set(jax_result.keys()) == set(torch_result.keys())
     assert list(jax_result.keys())
     for key in jax_result.keys():
-        if key in ['vq/commitment_loss', 'vq/codebook_loss', 'latents']:
+        if key == 'latents':
+            # todo: why do we need to accept lower absolute tolerance for this key?
+            atol = 1e-3
+        elif key in ['vq/commitment_loss', 'vq/codebook_loss']:
             # todo: why do we need to accept lower absolute tolerance for these keys?
             atol = 1e-3
         elif key == 'codes':
@@ -129,7 +143,7 @@ def test_equivalence_padding():
         elif key == 'z':
             atol = 1e-5
         else:
-            atol = 1e-5
+            raise ValueError(f"Unexpected key '{key}'.")
         assert np.allclose(jax_result[key], torch_result[key], atol=atol), \
             f'Failed to match outputs for key: {key} and atol: {atol}'
 

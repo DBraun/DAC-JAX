@@ -83,6 +83,7 @@ val/build_transforms.augment:
   - RescaleAudio
 
 # Data
+# See salient_excerpt in Descript AudioTools.
 train/SaliencyParams.enabled: 1
 train/SaliencyParams.num_tries: 8
 train/SaliencyParams.loudness_cutoff: -40

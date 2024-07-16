@@ -1,18 +1,23 @@
 # from __future__ import annotations  # we can't import this due to clu.metrics
 
 import os
-os.environ["XLA_FLAGS"] = (
-    # ' --xla_force_host_platform_device_count=2'
-    ' --xla_gpu_deterministic_ops=true'  # todo: https://github.com/google/flax/discussions/3382
-    # ' --xla_dump_to=tmp/xla_dump'
-    )
-# os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-# Pre-allocate 90% of TPU memory to minimize memory fragmentation and allocation
-# overhead
-# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"
+XLA_FLAGS = []
 
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+FORCE_DEVICE_COUNT = 0  # todo:
+if FORCE_DEVICE_COUNT:
+    XLA_FLAGS.append(f'--xla_force_host_platform_device_count={FORCE_DEVICE_COUNT}')
+
+DETERMINISTIC = False  # todo:
+if DETERMINISTIC:
+    # Deterministic will be slower.
+    # https://github.com/google/flax/discussions/3382
+    XLA_FLAGS.append('--xla_gpu_deterministic_ops=true')
+    os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
+    os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+if XLA_FLAGS:
+    os.environ["XLA_FLAGS"] = ' ' + ' '.join(XLA_FLAGS)
 
 import datetime
 from functools import partial
@@ -26,38 +31,42 @@ assert jax.config.jax_threefry_partitionable is True
 assert jax.config.jax_default_prng_impl == 'threefry2x32'
 from jax import random, numpy as jnp
 
-import argbind
 from absl import logging
+import argbind
 from clu import metric_writers, periodic_actions
 from clu.metrics import Average, Collection
 from einops import rearrange
-from flax.training.train_state import TrainState
 from flax.training.early_stopping import EarlyStopping
-from flax import struct
+from flax.training.train_state import TrainState
 from flax import jax_utils
+from flax import struct
 import grain.python as grain
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
 import tqdm
 
-from dac_jax.nn.loss import l1_loss, multiscale_stft_loss, mel_spectrogram_loss, generator_loss, discriminator_loss
-from dac_jax.model import DAC, Discriminator
 from dac_jax import load_model
+from dac_jax.audiotree import AudioTree
+from dac_jax.audiotree import transforms as transforms_lib
+from dac_jax.audiotree.datasources import SaliencyParams
+from dac_jax.model import DAC, Discriminator
+from dac_jax.nn.loss import l1_loss, multiscale_stft_loss, mel_spectrogram_loss, generator_loss, discriminator_loss
 
-from audio_tree_core import AudioTree
-from input_pipeline import create_audio_dataset, SaliencyParams
-import data_transforms
+from input_pipeline import create_audio_dataset
 
 warnings.filterwarnings("ignore", category=UserWarning)  # ignore librosa warnings about mel filters
 
 SaliencyParams = argbind.bind(SaliencyParams, "train", "val")
 
+
 # Transforms
 def filter_fn(fn):
     return (fn.__qualname__ != 'TfRandomMapTransform' and
             (hasattr(fn, 'random_map') or hasattr(fn, 'map') or hasattr(fn, 'np_random_map')))
-tfm = argbind.bind_module(data_transforms, "train", "val", filter_fn=filter_fn)
+
+# https://github.com/pseeth/argbind/tree/main/examples/bind_module
+transforms_lib = argbind.bind_module(transforms_lib, "train", "val", filter_fn=filter_fn)
 
 # Models
 DAC = argbind.bind(DAC)
@@ -99,16 +108,29 @@ def is_process_main():
 def build_transforms(
         augment: list[str] = None,
 ):
+    """
+    :param augment: A list of str names of Transforms (from ``audiotree.transforms``) such as VolumeNorm
+    :return: a list of instances of the Transforms.
+    """
     def to_transform_instances(transform_classes):
         if transform_classes is None:
             return None
         instances = []
         for TransformClass in transform_classes:
-            instance = getattr(tfm, TransformClass)()
+            instance = getattr(transforms_lib, TransformClass)()
             instances.append(instance)
         return instances
 
     return to_transform_instances(augment)
+
+
+def prepare_for_prefetch(xs):
+    local_device_count = jax.local_device_count()
+
+    def _prepare(x):
+        return x.reshape((local_device_count, -1) + x.shape[1:])
+
+    return jax.tree_util.tree_map(_prepare, xs)
 
 
 @argbind.bind('train', 'val', 'test')
@@ -117,18 +139,18 @@ def create_dataset(
         batch_size: int,
         duration=0.2,
         sources: Mapping[str, List[str]] = None,
-        mono: int = 1,
-        train: int = 0,
+        extensions: List[str] = None,
+        mono: int = 1,  # bool
+        train: int = 0,  # bool
         num_steps: int = None,
         seed: int = 0,
+        worker_count: int = 0,  # todo: https://github.com/google/grain/issues/495
+        prefetch_size: int = 1,
 ) -> Tuple[grain.DataLoader, float]:
-
-    assert sources is not None
-
-    saliency_params = SaliencyParams()
 
     ds = create_audio_dataset(
         sources=sources,
+        extensions=extensions,
         duration=duration,
         train=train,
         batch_size=batch_size,
@@ -136,14 +158,18 @@ def create_dataset(
         mono=mono,
         seed=seed,
         num_steps=num_steps,
-        extensions=None,
-        worker_count=0,  # todo:
-        worker_buffer_size=1,  # todo:
+        worker_count=worker_count,
+        worker_buffer_size=1,  # set to 1 because we use jax_utils.prefetch_to_device for similar behavior.
         transforms=transforms,
-        saliency_params=saliency_params,
+        saliency_params=SaliencyParams(),
     )
 
-    # ds = jax_utils.prefetch_to_device(ds, size=2)  # todo:
+    # similar to flax.jax_utils.replicate
+    ds = map(prepare_for_prefetch, ds)
+
+    if prefetch_size > 1:
+        # For prefetch to work, we must have already used prepare_for_prefetch
+        ds = jax_utils.prefetch_to_device(ds, size=prefetch_size)
 
     return iter(ds), duration
 
@@ -609,8 +635,6 @@ def train(
             with report_progress.timed("load_train_batch"):
                 batch = next(train_iter)
 
-            batch = jax_utils.replicate(batch)
-
             key, subkey = random.split(key)
 
             with report_progress.timed("train_step"):
@@ -627,9 +651,9 @@ def train(
                 # We perform reconstruction and save the input and output to WAV, which shows in tensorboard.
                 # todo: we are just taking a single batch from the validation set. This could change.
                 save_batch = next(save_iter)
-                save_batch_replicated = jax_utils.replicate(save_batch)
-                recons = save_samples(split_device(subkey), state, save_batch_replicated)
+                recons = save_samples(split_device(subkey), state, save_batch)
                 recons = jax_utils.unreplicate(recons)
+                save_batch = jax_utils.unreplicate(save_batch)
                 signal = rearrange(save_batch.audio_data, 'b c t -> b t c')
                 assert recons.ndim == 3
 
@@ -653,7 +677,6 @@ def train(
                     ran_once = False
                     for test_batch in eval_iter:  # todo: use nested tqdm here
                         ran_once = True
-                        test_batch = jax_utils.replicate(test_batch)
                         key, subkey = random.split(key)
                         eval_metrics = eval_step(split_device(subkey), state, test_batch, eval_metrics)
                     assert ran_once

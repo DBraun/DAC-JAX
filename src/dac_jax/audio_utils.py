@@ -82,7 +82,7 @@ def compute_stft_padding(length, window_length: int, hop_length: int, match_stri
 
 
 def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', match_stride=False,
-         padding_type: str = 'reflect'):
+         padding_type: str = 'reflect', use_scipy=False):
 
     """Reference:
     https://github.com/descriptinc/audiotools/blob/7776c296c711db90176a63ff808c26e0ee087263/audiotools/core/audio_signal.py#L1123
@@ -96,10 +96,8 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
     x = jnp.pad(x, pad_width=((0, 0), (0, 0), (pad, pad + right_pad)), mode=padding_type)
     x = rearrange(x, 'b c t -> (b c) t')
 
-    if True or (frame_length < 128):  # todo: https://github.com/google-deepmind/dm_aux/issues/2
-        stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window)
-        stft_data = rearrange(stft_data, '(b c) nt nf -> b c nf nt', b=batch_size)
-    else:
+    if use_scipy:
+        # This probably uses less memory than the aux method, but it's definitely slower than aux.
         _, _, stft_data = jax.scipy.signal.stft(x,
                                                 window=window,
                                                 nperseg=frame_length,
@@ -111,6 +109,10 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
                                                 padded=True,
                                                 )
         stft_data = rearrange(stft_data, '(b c) nf nt -> b c nf nt', b=batch_size)
+    else:
+        # todo: https://github.com/google-deepmind/dm_aux/issues/2
+        stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window)
+        stft_data = rearrange(stft_data, '(b c) nt nf -> b c nf nt', b=batch_size)
 
     if match_stride:
         # Drop first two and last two frames, which are added

@@ -17,8 +17,7 @@ from grain._src.core.transforms import TfRandomMapTransform
 import grain.python as grain
 
 from dac_jax.audio_utils import stft, istft
-
-from audio_tree_core import AudioTree
+from dac_jax.audiotree import AudioTree
 
 
 def _where_with_p(rng, modified: jnp.ndarray, original: jnp.ndarray, p: float):
@@ -344,3 +343,24 @@ class Choose(grain.RandomMapTransform):
                 element = transform(element, rng)
 
         return element
+
+
+class ReduceBatchTransform(grain.MapTransform):
+
+    def map(self, audio_signal: AudioTree) -> AudioTree:
+
+        def f(leaf):
+            if isinstance(leaf, np.ndarray):
+                if leaf.ndim > 1:
+                    shape = leaf.shape
+                    shape = (shape[0]*shape[1],) + shape[2:]
+                    return jnp.reshape(leaf, shape=shape)
+            return leaf
+
+        audio_signal = jax.tree_util.tree_map(f, audio_signal)
+
+        # We do this to make sample rate a scalar instead of an array.
+        # We assume that all entries of audio_signal.sample_rate are the same.
+        audio_signal = audio_signal.replace(sample_rate=audio_signal.sample_rate[0])
+
+        return audio_signal
