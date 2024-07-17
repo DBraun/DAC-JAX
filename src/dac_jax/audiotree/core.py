@@ -33,6 +33,9 @@ def jit_integrated_loudness(data, sample_rate, zeros: int):
     data = rearrange(data, 'b c t -> b t c')
     meter = jln.Meter(sample_rate, block_size=block_size, use_fir=True, zeros=zeros)
     loudness = jax.vmap(meter.integrated_loudness)(data)
+
+    loudness = jnp.where(jnp.isnan(loudness), jnp.full_like(loudness, -120), loudness)
+
     return loudness
 
 

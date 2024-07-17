@@ -15,7 +15,7 @@ def create_audio_dataset(
         sample_rate: int = 44100,
         mono: int = 1,
         seed: int = 0,
-        num_steps=None,
+        num_steps: int = None,
         worker_count: int = 0,
         worker_buffer_size: int = 1,
         transforms=None,
@@ -29,7 +29,7 @@ def create_audio_dataset(
         assert num_steps is not None and num_steps > 0
         datasource = AudioDataBalancedSource(
             sources=sources,
-            num_steps=num_steps*batch_size,
+            num_steps=num_steps * batch_size,
             sample_rate=sample_rate,
             mono=mono,
             duration=duration,
@@ -37,9 +37,9 @@ def create_audio_dataset(
             saliency_params=saliency_params,
         )
     else:
-        assert num_steps is None, "Train is False but num_steps is also None"
         datasource = AudioDataSimpleSource(
             sources=sources,
+            num_steps=num_steps * batch_size if num_steps is not None else None,
             sample_rate=sample_rate,
             mono=mono,
             duration=duration,

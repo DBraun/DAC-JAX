@@ -51,10 +51,12 @@ train.val_batch_size: 100
 train.num_iterations: 250000
 train.valid_freq: 1000
 train.sample_freq: 10000
-train.early_stop_patience: 4
 train.ckpt_max_keep: 4
 train.seed: 0
 train.tabulate: 1
+
+EarlyStopping.min_delta: .001
+EarlyStopping.patience: 4
 
 log_training.log_every_steps: 10
 

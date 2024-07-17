@@ -40,19 +40,21 @@ def _db2linear(decibels):
 
 
 @partial(jax.jit, donate_argnums=0)
-def _volume_norm_transform(audio_tree: AudioTree, rng: jnp.ndarray, min_db: float, max_db: float, p: float) -> (
+def _volume_norm_transform(audio_tree: AudioTree, key: jnp.ndarray, min_db: float, max_db: float, p: float) -> (
         AudioTree):
 
     audio_data = audio_tree.audio_data
 
     B = audio_data.shape[0]
 
-    target_db = random.uniform(rng, shape=(B,), minval=min_db, maxval=max_db)
+    key, subkey = random.split(key)
+    target_db = random.uniform(subkey, shape=(B,), minval=min_db, maxval=max_db)
     gain_db = target_db - audio_tree.loudness
 
     modified = audio_data * _db2linear(gain_db)[:, None, None]
 
-    use_modified = random.uniform(rng, shape=(B,)) < p
+    key, subkey = random.split(key)
+    use_modified = random.uniform(subkey, shape=(B,)) < p
     use_modified = jnp.expand_dims(use_modified, axis=(1, 2))
 
     audio_data = jnp.where(use_modified, modified, audio_data)
@@ -64,16 +66,17 @@ def _volume_norm_transform(audio_tree: AudioTree, rng: jnp.ndarray, min_db: floa
 
 
 @partial(jax.jit, donate_argnums=0)
-def _volume_change_transform(audio_tree: AudioTree, rng: jnp.ndarray, min_db, max_db, p) -> (
+def _volume_change_transform(audio_tree: AudioTree, key: jnp.ndarray, min_db, max_db, p) -> (
         tuple)[AudioTree, np.ndarray]:
 
     audio_data = audio_tree.audio_data
 
     B = audio_data.shape[0]
 
-    gain_db = random.uniform(rng, shape=(B,), minval=min_db, maxval=max_db)
+    key, subkey = random.split(key)
+    gain_db = random.uniform(subkey, shape=(B,), minval=min_db, maxval=max_db)
 
-    key, subkey = random.split(rng)
+    key, subkey = random.split(key)
     gain_db = _where_with_p(subkey, gain_db, jnp.zeros_like(gain_db), p)
 
     audio_data = audio_data * _db2linear(gain_db)[:, None, None]
@@ -236,11 +239,12 @@ def _corrupt_phase(
     return audio_tree.replace(audio_data=audio_data)
 
 
-@partial(jax.jit, donate_argnums=0, static_argnums=(2, 3, 4, 5))
+@partial(jax.jit, donate_argnums=0, static_argnums=(2, 3, 4, 5, 6))
 def _shift_phase(
         audio_tree: AudioTree,
-        rng: jnp.ndarray,
+        key: jnp.ndarray,
         p: float,
+        amount: float,
         hop_factor: float = 0.5,
         frame_length: float = 2048,
         window: str = 'hann',
@@ -248,18 +252,23 @@ def _shift_phase(
     audio_data = audio_tree.audio_data
     B, C, length = audio_data.shape
 
-    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, match_stride=False,
-                       padding_type='reflect')
-    istft_fun = partial(istft, window=window, length=length)
+    frame_step = int(frame_length * hop_factor)
+    noverlap = frame_length - frame_step
+
+    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, padding_type='reflect',
+                       use_scipy=True)
+    istft_fun = partial(istft, frame_length=frame_length, noverlap=noverlap, window=window, length=length)
 
     stft_data = stft_fun(audio_data)
 
-    amt = random.uniform(rng, shape=stft_data.shape[:-2], minval=-jnp.pi, maxval=jnp.pi)
+    key, subkey = random.split(key)
+    amt = random.uniform(subkey, shape=stft_data.shape[:-2], minval=-jnp.pi*amount, maxval=jnp.pi*amount)
 
     stft_data = stft_data * jnp.expand_dims(jnp.exp(1j * amt), axis=(-2, -1))
     shifted = istft_fun(stft_data)
 
-    audio_data = _where_with_p(rng, shifted, audio_data, p)
+    key, subkey = random.split(key)
+    audio_data = _where_with_p(subkey, shifted, audio_data, p)
 
     return audio_tree.replace(audio_data=audio_data)
 
@@ -285,21 +294,23 @@ class CorruptPhase(grain.RandomMapTransform):
 
 class ShiftPhase(grain.RandomMapTransform):
 
-    def __init__(self, prob: float = 1):
+    def __init__(self, amount: float = 1, prob: float = 1):
         """
-        With a probability ``prob``, perform a phase shift on the audio
+        With a probability ``prob``, perform a phase shift on the audio. The phase shift range is in the range
+         [-pi * amount, pi * amount].
 
         :param p: The probability between 0 and 1 of swapping stereo channels.
         """
         assert 0 <= prob <= 1
         self.prob = prob
+        self.amount = 1
 
     def random_map(self, audio_tree: AudioTree, rng: np.random.Generator) -> AudioTree:
         if self.prob == 0:
             return audio_tree
 
         subkey = random.key(rng.integers(2 ** 63))
-        return _shift_phase(audio_tree, subkey, self.prob)
+        return _shift_phase(audio_tree, subkey, self.prob, self.amount)
 
 
 class Choose(grain.RandomMapTransform):

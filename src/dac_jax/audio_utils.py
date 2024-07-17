@@ -51,7 +51,7 @@ def find_audio(folder: Union[str, Path], ext: List[str] = None) -> List[Path]:
 
 
 def compute_stft_padding(length, window_length: int, hop_length: int, match_stride: bool):
-    """Compute how the STFT should be padded, based on match\_stride.
+    """Compute how the STFT should be padded, based on match_stride.
 
     Parameters
     ----------
@@ -75,7 +75,7 @@ def compute_stft_padding(length, window_length: int, hop_length: int, match_stri
         right_pad = math.ceil(length / hop_length) * hop_length - length
         pad = (window_length - hop_length) // 2
     else:
-        right_pad = 0
+        right_pad = math.ceil(length/hop_length)*hop_length-length
         pad = 0
 
     return right_pad, pad
@@ -102,16 +102,14 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
                                                 window=window,
                                                 nperseg=frame_length,
                                                 noverlap=(frame_length - frame_step),
-                                                nfft=frame_length,
-                                                detrend=False,
-                                                return_onesided=True,
-                                                boundary='zeros',
-                                                padded=True,
+                                                padded=False,
                                                 )
         stft_data = rearrange(stft_data, '(b c) nf nt -> b c nf nt', b=batch_size)
+        stft_data = stft_data * (frame_length / 2)  # note that we undo this in istft.
     else:
         # todo: https://github.com/google-deepmind/dm_aux/issues/2
-        stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window)
+        stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window,
+                                      pad_mode='constant', pad=aux.spectral.Pad.BOTH)
         stft_data = rearrange(stft_data, '(b c) nt nf -> b c nf nt', b=batch_size)
 
     if match_stride:
@@ -123,6 +121,8 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
 
 
 def istft(stft_matrix: chex.Array,
+          frame_length: int,
+          noverlap: int,
           window: Optional[Union[str, float, Tuple[str, float]]] = 'hann',
           length: Optional[int] = None) -> chex.Array:
     """
@@ -145,12 +145,11 @@ def istft(stft_matrix: chex.Array,
     """
     # Compute iSTFT
     _, reconstructed_signal = jax.scipy.signal.istft(stft_matrix,
-                                                     fs=1.0,
+                                                     noverlap=noverlap,
                                                      window=window,
-                                                     input_onesided=True,
-                                                     boundary=True,
-                                                     # padded=True,
-    )
+                                                     )
+
+    reconstructed_signal = reconstructed_signal / (frame_length / 2)
 
     # Trim or pad the output signal to the desired length
     if length is not None:

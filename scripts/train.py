@@ -44,7 +44,6 @@ import grain.python as grain
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
-import tqdm
 
 from dac_jax import load_model
 from dac_jax.audiotree import AudioTree
@@ -78,6 +77,8 @@ SAMPLE_RATE = DAC().sample_rate
 multiscale_stft_loss = argbind.bind(multiscale_stft_loss)
 mel_spectrogram_loss = argbind.bind(mel_spectrogram_loss)
 mel_spectrogram_loss = partial(mel_spectrogram_loss, sample_rate=SAMPLE_RATE)
+
+EarlyStopping = argbind.bind(EarlyStopping)
 
 
 @argbind.bind()
@@ -227,7 +228,7 @@ def create_generator_optimizer(
         schedule: optax.Schedule,
         adam_b1: float = 0.9,
         adam_b2: float = 0.999,
-        adam_weight_decay: float = .01,
+        adam_weight_decay: float = 0.0,
         grad_clip: float = 1,
 ):
     # Combining gradient transforms using `optax.chain`.
@@ -293,7 +294,7 @@ def create_discriminator_optimizer(
         schedule: optax.Schedule,
         adam_b1: float = 0.9,
         adam_b2: float = 0.999,
-        adam_weight_decay: float = .01,
+        adam_weight_decay: float = 0.0,
         grad_clip: float = 1,
 ):
     gradient_transform = optax.chain(
@@ -342,7 +343,7 @@ def eval_step(rng, state: GenDiscState, audio_tree: AudioTree, eval_metrics, lam
 
     audio_data = audio_tree.audio_data
 
-    audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t')
+    audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t', c=1)
 
     output = state.generator.apply_fn({'params': state.generator.params}, audio_data, SAMPLE_RATE, train=False,
                                       rngs={'rng_stream': rng})
@@ -437,7 +438,7 @@ def train_step(rng, state: GenDiscState, train_metrics, audio_tree: AudioTree, s
 
     subkey1, subkey2 = random.split(rng, num=2)
 
-    audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t')
+    audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t', c=1)
 
     state, output = train_step_generator(subkey2, state, audio_data)
     state, loss = train_step_discriminator(state, audio_data, output)
@@ -467,12 +468,12 @@ def save_samples(rng, state: GenDiscState, audio_tree: AudioTree):
     """Save audio samples to tensorboard."""
     audio_data = audio_tree.audio_data
     batch_size = audio_data.shape[0]
-    audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t')
+    audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t', c=1)
 
     output = state.generator.apply_fn({'params': state.generator.params}, audio_data, SAMPLE_RATE, train=False,
                                       rngs={'rng_stream': rng})
     recons = output['audio']
-    recons = rearrange(recons, '(b c) 1 t -> b t c', b=batch_size)
+    recons = rearrange(recons, '(b c) 1 t -> b t c', b=batch_size, c=1)
     return recons
 
 
@@ -519,7 +520,6 @@ def train(
         num_iterations=250_000,
         valid_freq=100,
         sample_freq=100,
-        early_stop_patience=0,
         ckpt_max_keep=2,
         seed=0,
         batch_size=4,
@@ -527,22 +527,22 @@ def train(
         restore=False,
         best_key='eval/loss',
         best_mode='min',
-        enable_async_checkpointing=False,
+        enable_async_checkpointing=True,
         log_level='info',
         save_path='runs',
         tabulate=0,
 ):
 
-    logging.set_verbosity(logging.ERROR)  # absl logging: # todo: set this to INFO but work well with tqdm
+    logging.set_verbosity(log_level.upper())  # absl logging
     logger.setLevel(log_level.upper())  # native python logging
 
     print(f'devices: {jax.devices()}')
 
-    if batch_size % jax.device_count() > 0:
-        raise ValueError('Batch size must be divisible by the number of devices')
-    local_batch_size = batch_size // jax.process_count()
-    local_val_batch_size = val_batch_size // jax.process_count()
-    del batch_size
+    local_batch_size = batch_size
+    local_val_batch_size = val_batch_size
+    # todo: or use jax.process_count()
+    batch_size *= jax.device_count()
+    val_batch_size *= jax.device_count()
 
     if name is not None:
         workdir = os.path.join(save_path, name)
@@ -563,11 +563,11 @@ def train(
 
     with argbind.scope(args, "train"):
         transforms = build_transforms()
-        train_iter, duration = create_dataset(transforms, batch_size=local_batch_size, train=True,
+        train_iter, duration = create_dataset(transforms, batch_size=batch_size, train=True,
                                               num_steps=num_iterations)
     with argbind.scope(args, "val"):
         transforms = build_transforms()
-        save_iter, _ = create_dataset(transforms, batch_size=local_val_batch_size)
+        save_iter, _ = create_dataset(transforms, batch_size=val_batch_size)
 
     n_channels = 1
     shape = (local_batch_size, n_channels, round(SAMPLE_RATE * duration))
@@ -616,8 +616,6 @@ def train(
                         metrics={best_key: jnp.inf if best_mode == 'min' else -jnp.inf})
 
     hooks = []
-    # todo: the report_progress won't show up in TensorBoard because the absl logging level is set to ERROR
-    #  in order to not clash with tqdm printing.
     report_progress = periodic_actions.ReportProgress(num_train_steps=num_iterations,
                                                       every_secs=None,
                                                       every_steps=10,
@@ -627,10 +625,10 @@ def train(
         # todo: the Profile hook seems slow, so we don't use it.
         # hooks += [periodic_actions.Profile(num_profile_steps=10, profile_duration_ms=0, logdir=workdir)]
 
-    early_stop = EarlyStopping(min_delta=1e-3, patience=early_stop_patience)
+    early_stop = EarlyStopping()
 
     with metric_writers.ensure_flushes(writer):
-        for step in tqdm.trange(1, num_iterations+1, desc='Train Steps'):
+        for step in range(1, num_iterations+1):
 
             with report_progress.timed("load_train_batch"):
                 batch = next(train_iter)
@@ -654,7 +652,7 @@ def train(
                 recons = save_samples(split_device(subkey), state, save_batch)
                 recons = jax_utils.unreplicate(recons)
                 save_batch = jax_utils.unreplicate(save_batch)
-                signal = rearrange(save_batch.audio_data, 'b c t -> b t c')
+                signal = rearrange(save_batch.audio_data, 'b c t -> b t c', c=1)
                 assert recons.ndim == 3
 
                 writer.write_audios(step=step,
@@ -672,10 +670,10 @@ def train(
                     with argbind.scope(args, "val"):
                         # todo: don't recreate the eval dataset multiple times
                         transforms = build_transforms()
-                        eval_iter, _ = create_dataset(transforms, batch_size=local_val_batch_size)
+                        eval_iter, _ = create_dataset(transforms, batch_size=val_batch_size)
 
                     ran_once = False
-                    for test_batch in eval_iter:  # todo: use nested tqdm here
+                    for test_batch in eval_iter:
                         ran_once = True
                         key, subkey = random.split(key)
                         eval_metrics = eval_step(split_device(subkey), state, test_batch, eval_metrics)
@@ -690,6 +688,8 @@ def train(
 
                 with report_progress.timed("checkpoint_step"):
                     save_checkpoint(checkpoint_manager, state, step, summary)
+
+    checkpoint_manager.wait_until_finished()
 
 
 if __name__ == '__main__':
