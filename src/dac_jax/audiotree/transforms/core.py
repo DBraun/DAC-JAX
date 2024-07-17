@@ -20,6 +20,12 @@ from dac_jax.audio_utils import stft, istft
 from dac_jax.audiotree import AudioTree
 
 
+class Identity(grain.MapTransform):
+
+    def map(self, element):
+        return element
+
+
 def _where_with_p(rng, modified: jnp.ndarray, original: jnp.ndarray, p: float):
     B = modified.shape[0]
     use_modified = random.uniform(rng, shape=(B,), minval=0) < p
@@ -45,7 +51,7 @@ def _volume_norm_transform(audio_tree: AudioTree, rng: jnp.ndarray, min_db: floa
 
     modified = audio_data * _db2linear(gain_db)[:, None, None]
 
-    use_modified = random.uniform(rng, shape=(B,), minval=0) < p
+    use_modified = random.uniform(rng, shape=(B,)) < p
     use_modified = jnp.expand_dims(use_modified, axis=(1, 2))
 
     audio_data = jnp.where(use_modified, modified, audio_data)
@@ -76,12 +82,6 @@ def _volume_change_transform(audio_tree: AudioTree, rng: jnp.ndarray, min_db, ma
     return audio_tree, gain_db
 
 
-class Identity(grain.MapTransform):
-
-    def map(self, element):
-        return element
-
-
 class VolumeChange(grain.RandomMapTransform):
 
     def __init__(self, min_db: float = 0, max_db: float = 0, prob: float = 1):
@@ -102,13 +102,7 @@ class VolumeChange(grain.RandomMapTransform):
         return audio_tree
 
 
-class VolumeNorm(grain.RandomMapTransform):
-
-    def __init__(self, min_db=0, max_db=0, prob: float = 1):
-        self.min_db = min_db
-        self.max_db = max_db
-        assert 0 <= prob <= 1
-        self.prob = prob
+class VolumeNorm(VolumeChange):
 
     def random_map(self, audio_tree: AudioTree, rng: np.random.Generator) -> AudioTree:
         if self.prob == 0:
@@ -116,7 +110,9 @@ class VolumeNorm(grain.RandomMapTransform):
 
         if audio_tree.loudness is None:
             audio_tree = audio_tree.replace_loudness()
+
         subkey = random.key(rng.integers(2**63))
+        
         return _volume_norm_transform(audio_tree, subkey, self.min_db, self.max_db, self.prob)
 
 
@@ -305,8 +301,7 @@ class Choose(grain.RandomMapTransform):
     With probability ``prob``, choose a ``c`` transform(s) among ``transforms`` with optional probability weights ``weights``
     """
 
-    def __init__(self, *transforms, c: int = 1, weights=None,
-                 prob: float = 1):
+    def __init__(self, *transforms, c: int = 1, weights=None, prob: float = 1):
 
         if weights is not None:
             assert len(weights) == len(transforms)

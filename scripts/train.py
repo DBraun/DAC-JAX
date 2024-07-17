@@ -137,7 +137,7 @@ def prepare_for_prefetch(xs):
 def create_dataset(
         transforms: list,
         batch_size: int,
-        duration=0.2,
+        duration: float = 0.2,
         sources: Mapping[str, List[str]] = None,
         extensions: List[str] = None,
         mono: int = 1,  # bool
