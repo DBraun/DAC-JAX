@@ -27,9 +27,10 @@ class Identity(grain.MapTransform):
 
 
 def _where_with_p(rng, modified: jnp.ndarray, original: jnp.ndarray, p: float):
-    B = modified.shape[0]
-    use_modified = random.uniform(rng, shape=(B,), minval=0) < p
-    use_modified = jnp.expand_dims(use_modified, axis=(1, 2))
+    B = original.shape[0]
+
+    shape = (B,) + (1,) * (original.ndim - 1)
+    use_modified = random.uniform(rng, shape=shape, minval=0) < p
 
     return jnp.where(use_modified, modified, original)
 
