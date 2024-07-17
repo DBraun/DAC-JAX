@@ -103,7 +103,13 @@ class VolumeChange(grain.RandomMapTransform):
         return audio_tree
 
 
-class VolumeNorm(VolumeChange):
+class VolumeNorm(grain.RandomMapTransform):
+
+    def __init__(self, min_db: float = 0, max_db: float = 0, prob: float = 1):
+        self.min_db = min_db
+        self.max_db = max_db
+        assert 0 <= prob <= 1
+        self.prob = prob
 
     def random_map(self, audio_tree: AudioTree, rng: np.random.Generator) -> AudioTree:
         if self.prob == 0:

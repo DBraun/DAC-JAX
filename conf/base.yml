@@ -24,11 +24,11 @@ Discriminator.bands:
   - [0.75, 1.0]
 
 # Schedules
-create_generator_scheduler.learning_rate: 1e-4
-create_generator_scheduler.lr_gamma: 0.999996
+create_generator_schedule.learning_rate: 1e-4
+create_generator_schedule.lr_gamma: 0.999996
 
-create_discriminator_scheduler.learning_rate: 1e-4
-create_discriminator_scheduler.lr_gamma: 0.999996
+create_discriminator_schedule.learning_rate: 1e-4
+create_discriminator_schedule.lr_gamma: 0.999996
 
 # Optimization
 create_generator_optimizer.adam_b1: 0.8
