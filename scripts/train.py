@@ -362,7 +362,7 @@ def eval_step(rng, state: GenDiscState, audio_tree: AudioTree, eval_metrics, lam
         output['adv/feat_loss'],
     ) = generator_loss(fake, real)
 
-    output['loss'] = sum([v * output[k] for k, v in lambdas.items() if k in output])
+    output['loss'] = sum([v * output[k] for k, v in lambdas.items()])
 
     eval_metrics = eval_metrics.merge(EvalMetrics.gather_from_model_output(axis_name='ensemble', **output))
 
@@ -416,7 +416,7 @@ def train_step_generator(rng, state: GenDiscState, audio_data, lambdas: Mapping[
             output['adv/gen_loss'],
             output['adv/feat_loss'],
         ) = generator_loss(fake, real)
-        loss = output['loss'] = sum([v * output[k] for k, v in lambdas.items() if k in output])
+        loss = output['loss'] = sum([v * output[k] for k, v in lambdas.items()])
         return loss, output
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
