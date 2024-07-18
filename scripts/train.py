@@ -565,9 +565,6 @@ def train(
         transforms = build_transforms()
         train_iter, duration = create_dataset(transforms, batch_size=batch_size, train=True,
                                               num_steps=num_iterations)
-    with argbind.scope(args, "val"):
-        transforms = build_transforms()
-        save_iter, _ = create_dataset(transforms, batch_size=val_batch_size)
 
     n_channels = 1
     shape = (local_batch_size, n_channels, round(SAMPLE_RATE * duration))
@@ -648,6 +645,10 @@ def train(
                 # Note: right now save_iter is just the validation dataset.
                 # We perform reconstruction and save the input and output to WAV, which shows in tensorboard.
                 # todo: we are just taking a single batch from the validation set. This could change.
+                with argbind.scope(args, "val"):
+                    transforms = build_transforms()
+                    save_iter, _ = create_dataset(transforms, batch_size=val_batch_size)
+
                 save_batch = next(save_iter)
                 recons = save_samples(split_device(subkey), state, save_batch)
                 recons = jax_utils.unreplicate(recons)

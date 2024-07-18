@@ -13,10 +13,6 @@ from flax.typing import (
 )
 
 
-def truncated_normal(stddev=1e-2):
-    return lambda key, shape, dtype=jnp.float32: jax.random.truncated_normal(key, -2, 2, shape, dtype) * stddev
-
-
 def default_stride(strides):
     if strides is None:
         return 1
@@ -65,6 +61,15 @@ def convtranspose_to_output_length(s, d, k, L):
     return L
 
 
+class LeakyReLU(nn.Module):
+
+    negative_slope: float = .01
+
+    @nn.compact
+    def __call__(self, x):
+        return nn.leaky_relu(x, negative_slope=self.negative_slope)
+
+
 class WNConv1d(nn.Module):
 
     # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
@@ -82,7 +87,7 @@ class WNConv1d(nn.Module):
     dtype: Optional[Dtype] = None
     param_dtype: Dtype = jnp.float32
     precision: PrecisionLike = None
-    kernel_init: nn.initializers.Initializer = truncated_normal(0.02)  # note: non-standard
+    kernel_init: nn.initializers.Initializer = jax.nn.initializers.truncated_normal(.02, lower=-2, upper=2)  # note: non-standard
     bias_init: nn.initializers.Initializer = nn.initializers.zeros  # note: non-standard
 
     @nn.compact
@@ -137,7 +142,7 @@ class WNConvTranspose1d(nn.Module):
     dtype: Optional[Dtype] = None
     param_dtype: Dtype = jnp.float32
     precision: PrecisionLike = None
-    kernel_init: Initializer = nn.initializers.lecun_normal()
+    kernel_init: Initializer = nn.initializers.kaiming_uniform()  # to match PyTorch
     bias_init: Initializer = nn.initializers.zeros_init()
     transpose_kernel = True  # note: non-standard
 

@@ -92,8 +92,8 @@ def torch_to_linen(torch_params: dict,
     for i in range(n_codebooks):
         quantizer = {}
         quantizer['in_proj'] = {
-            'WeightNorm_0': {'Conv_0/kernel/scale': torch_params[f'quantizer.quantizers.{i}.in_proj.weight_g'].squeeze((1, 2))},
-            'Conv_0': {
+            'layer_instance/kernel/scale': torch_params[f'quantizer.quantizers.{i}.in_proj.weight_g'].squeeze((1, 2)),
+            'layer_instance': {
                 'bias': torch_params[f'quantizer.quantizers.{i}.in_proj.bias'],
                 'kernel': torch_params[f'quantizer.quantizers.{i}.in_proj.weight_v'].T,
             }
@@ -102,8 +102,8 @@ def torch_to_linen(torch_params: dict,
             'embedding': torch_params[f'quantizer.quantizers.{i}.codebook.weight']
         }
         quantizer['out_proj'] = {
-            'WeightNorm_0': {'Conv_0/kernel/scale': torch_params[f'quantizer.quantizers.{i}.out_proj.weight_g'].squeeze((1, 2))},
-            'Conv_0': {
+            'layer_instance/kernel/scale': torch_params[f'quantizer.quantizers.{i}.out_proj.weight_g'].squeeze((1, 2)),
+            'layer_instance': {
                 'bias': torch_params[f'quantizer.quantizers.{i}.out_proj.bias'],
                 'kernel': torch_params[f'quantizer.quantizers.{i}.out_proj.weight_v'].T,
             }

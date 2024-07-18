@@ -11,7 +11,9 @@ import flax.linen as nn
 
 from einops import rearrange
 
-from dac_jax.nn.layers import WNConv1d
+
+def WNConv1d(*args, **kwargs):
+    return nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=nn.initializers.kaiming_uniform()))
 
 
 def mse_loss(predictions: jnp.ndarray, targets: jnp.ndarray, reduction='mean') -> jnp.ndarray:

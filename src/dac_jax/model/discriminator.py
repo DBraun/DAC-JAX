@@ -6,30 +6,18 @@ from einops import rearrange
 
 from dac_jax.resample import resample
 from dac_jax.audio_utils import stft
-
-
-class LeakyReLU(nn.Module):
-
-    negative_slope: float = .01
-
-    @nn.compact
-    def __call__(self, x):
-        return nn.leaky_relu(x, negative_slope=self.negative_slope)
+from dac_jax.nn.layers import LeakyReLU
 
 
 def WNConv1d(*args, act=True, **kwargs):
-    # todo: pick kernel_init and bias_init to match PyTorch defaults
-    # https://github.com/google/jax/issues/4862
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs))]
+    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=nn.initializers.kaiming_uniform()))]
     if act:
         layers.append(LeakyReLU(0.1))
     return nn.Sequential(layers)
 
 
 def WNConv2d(*args, act=True, **kwargs):
-    # todo: pick kernel_init and bias_init to match PyTorch defaults
-    # https://github.com/google/jax/issues/4862
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs))]
+    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=nn.initializers.kaiming_uniform()))]
     if act:
         layers.append(LeakyReLU(0.1))
     return nn.Sequential(layers)
@@ -150,7 +138,7 @@ class MRD(nn.Module):
                 fmap.append(band)
             x.append(band)
 
-        x = jnp.concatenate(x, axis=-2)
+        x = jnp.concatenate(x, axis=-2)  # concatenate along frequency axis
         x = conv_post(x)
         fmap.append(x)
 
@@ -170,10 +158,7 @@ class MRD(nn.Module):
         if not jnp.issubdtype(x.dtype, jnp.complexfloating):
             return x
 
-        xr = jnp.zeros(x.shape+(2,), dtype=x.real.dtype)
-        xr = xr.at[..., 0].set(x.real)
-        xr = xr.at[..., 1].set(x.imag)
-        return xr
+        return jnp.stack([x.real, x.imag], axis=-1)
 
 
 class Discriminator(nn.Module):
