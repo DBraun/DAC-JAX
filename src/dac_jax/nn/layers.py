@@ -1,8 +1,6 @@
 import math
-from typing import Optional, Union, Sequence
+from typing import Optional, Sequence, Union
 
-import jax
-import jax.numpy as jnp
 import flax.linen as nn
 from flax.typing import (
   Array,
@@ -11,6 +9,8 @@ from flax.typing import (
   PaddingLike,
   Initializer,
 )
+import jax
+import jax.numpy as jnp
 
 
 def default_stride(strides):

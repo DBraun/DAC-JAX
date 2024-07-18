@@ -1,15 +1,10 @@
 from typing import Union, Tuple
 
+from einops import rearrange
+import flax.linen as nn
 import jax
-jax.config.update('jax_threefry_partitionable', True)
 import jax.numpy as jnp
 import jax.random
-assert jax.config.jax_threefry_partitionable == True
-assert jax.config.jax_default_prng_impl == 'threefry2x32'
-
-import flax.linen as nn
-
-from einops import rearrange
 
 
 def WNConv1d(*args, **kwargs):

@@ -1,15 +1,12 @@
-from typing import Callable, Optional
 from functools import partial
 import os
-
-import numpy as np
-
-import jax
-import jax.numpy as jnp
-
-from einops import rearrange
+from typing import Callable, Optional
 
 import dm_aux as aux
+from einops import rearrange
+import jax
+import jax.numpy as jnp
+import numpy as np
 
 from dac_jax.audio_utils import stft, decibel_loudness
 

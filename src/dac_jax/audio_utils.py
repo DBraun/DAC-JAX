@@ -1,18 +1,14 @@
-import math
-from typing import Optional, Union, Tuple, List
-from pathlib import Path
 import glob
+import math
+from pathlib import Path
+from typing import List, Optional, Tuple, Union
 
 import chex
-
-import jax.scipy.signal
-import jax.numpy as jnp
-
-import jaxloudnorm as jln
-
 import dm_aux as aux
-
 from einops import rearrange
+import jax.numpy as jnp
+import jax.scipy.signal
+import jaxloudnorm as jln
 
 
 def find_audio(folder: Union[str, Path], ext: List[str] = None) -> List[Path]:

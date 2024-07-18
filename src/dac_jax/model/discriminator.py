@@ -1,8 +1,9 @@
 from dataclasses import field
+
+from einops import rearrange
+import flax.linen as nn
 import jax.numpy as jnp
 import jax.scipy.signal
-import flax.linen as nn
-from einops import rearrange
 
 from dac_jax.resample import resample
 from dac_jax.audio_utils import stft
