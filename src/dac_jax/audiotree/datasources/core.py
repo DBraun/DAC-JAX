@@ -9,6 +9,8 @@ from grain import python as grain
 
 from dac_jax.audiotree import AudioTree
 
+_default_extensions = ['.wav', '.flac', '.mp3', '.mp4']
+
 
 @struct.dataclass
 class SaliencyParams:
@@ -91,7 +93,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         self.mono = bool(mono)
         self.duration = duration
         if extensions is None:
-            extensions = ['.wav', '.flac', '.mp3', '.mp4', '.ogg']
+            extensions = _default_extensions
         self.saliency_params = saliency_params
 
         filepaths = []
@@ -137,7 +139,7 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         self.mono = bool(mono)
         self.duration = duration
         if extensions is None:
-            extensions = ['.wav', '.flac', '.mp3', '.mp4', '.ogg']
+            extensions = _default_extensions
         self.saliency_params = saliency_params
 
         groups = []
