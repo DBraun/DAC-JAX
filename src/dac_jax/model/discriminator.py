@@ -10,7 +10,9 @@ from dac_jax.audio_utils import stft
 from dac_jax.nn.layers import LeakyReLU
 
 
-def WNConv1d(*args, act=True, **kwargs):
+def disc_WNConv1d(*args, act=True, **kwargs):
+    # Note, don't use the truncated normal initializer,
+    # which seems to be what's used in the Encoder/Decoder/Quantizer.
     layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=nn.initializers.kaiming_uniform()))]
     if act:
         layers.append(LeakyReLU(0.1))
@@ -64,13 +66,13 @@ class MSD(nn.Module):
     @nn.compact
     def __call__(self, x):
         convs = [
-            WNConv1d(features=16, kernel_size=15, strides=1, padding=7),
-            WNConv1d(features=64, kernel_size=41, strides=4, feature_group_count=4, padding=20),
-            WNConv1d(features=256, kernel_size=41, strides=4, feature_group_count=16, padding=20),
-            WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=64, padding=20),
-            WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=256, padding=20),
-            WNConv1d(features=1024, kernel_size=5, strides=1, padding=2),
-            WNConv1d(features=1, kernel_size=3, strides=1, padding=1, act=False)
+            disc_WNConv1d(features=16, kernel_size=15, strides=1, padding=7),
+            disc_WNConv1d(features=64, kernel_size=41, strides=4, feature_group_count=4, padding=20),
+            disc_WNConv1d(features=256, kernel_size=41, strides=4, feature_group_count=16, padding=20),
+            disc_WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=64, padding=20),
+            disc_WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=256, padding=20),
+            disc_WNConv1d(features=1024, kernel_size=5, strides=1, padding=2),
+            disc_WNConv1d(features=1, kernel_size=3, strides=1, padding=1, act=False)
         ]
 
         x = resample(x, old_sr=self.sample_rate, new_sr=self.sample_rate//self.rate)

@@ -9,6 +9,7 @@ from einops import rearrange
 import jax.numpy as jnp
 import jax.scipy.signal
 import jaxloudnorm as jln
+import librosa
 
 
 def find_audio(folder: Union[str, Path], ext: List[str] = None) -> List[Path]:
@@ -158,6 +159,47 @@ def istft(stft_matrix: chex.Array,
             reconstructed_signal = reconstructed_signal[..., :length]
 
     return reconstructed_signal
+
+
+def mel_spectrogram(
+    spectrograms: chex.Array,
+    log_scale: bool = True,
+    sample_rate: int = 16000,
+    frame_length: Optional[int] = 2048,
+    num_features: int = 64,
+    lower_edge_hertz: float = 80.0,
+    upper_edge_hertz: Optional[float] = 7600.0,
+    ) -> chex.Array:
+    """Converts the spectrograms to Mel-scale.
+
+    Adapted from dm_aux:
+    https://github.com/google-deepmind/dm_aux/blob/77f5ed76df2928bac8550e1c5466c0dac2934be3/dm_aux/spectral.py#L312
+
+    https://en.wikipedia.org/wiki/Mel_scale
+
+    Args:
+    spectrograms: Input spectrograms of shape [batch_size, time_steps,
+      num_features].
+    log_scale: Whether to return the mel_filterbanks in the log scale.
+    sample_rate: The sample rate of the input audio.
+    frame_length: The length of each spectrogram frame.
+    num_features: The number of mel spectrogram features.
+    lower_edge_hertz: Lowest frequency to consider to general mel filterbanks.
+    upper_edge_hertz: Highest frequency to consider to general mel filterbanks.
+      If None, use `sample_rate / 2.0`.
+
+    Returns:
+    Converted spectrograms in (log) Mel-scale.
+    """
+    # This setup mimics tf.signal.linear_to_mel_weight_matrix.
+    linear_to_mel_weight_matrix = librosa.filters.mel(
+        sr=sample_rate, n_fft=frame_length, n_mels=num_features,
+        fmin=lower_edge_hertz, fmax=upper_edge_hertz).T
+    spectrograms = jnp.matmul(spectrograms, linear_to_mel_weight_matrix)
+
+    if log_scale:
+        spectrograms = jnp.log(spectrograms + 1e-6)
+    return spectrograms
 
 
 def decibel_loudness(stft_data: jnp.ndarray, clamp_eps=1e-5, pow=2.) -> jnp.ndarray:

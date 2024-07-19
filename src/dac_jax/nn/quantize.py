@@ -6,9 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax.random
 
-
-def WNConv1d(*args, **kwargs):
-    return nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=nn.initializers.kaiming_uniform()))
+from dac_jax.nn.layers import WNConv1d
 
 
 def mse_loss(predictions: jnp.ndarray, targets: jnp.ndarray, reduction='mean') -> jnp.ndarray:
@@ -62,7 +60,9 @@ class VectorQuantize(nn.Module):
     def setup(self):
         self.in_proj = WNConv1d(features=self.codebook_dim, kernel_size=(1,))
         self.out_proj = WNConv1d(features=self.input_dim, kernel_size=(1,))
-        self.codebook = nn.Embed(num_embeddings=self.codebook_size, features=self.codebook_dim)
+        # PyTorch uses a normal distribution for weight initialization of Embeddings.
+        self.codebook = nn.Embed(num_embeddings=self.codebook_size, features=self.codebook_dim,
+                                 embedding_init=nn.initializers.normal())
 
     def __call__(self, z) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """Quantized the input tensor using a fixed codebook and returns the corresponding codebook vectors

@@ -2,13 +2,12 @@ from functools import partial
 import os
 from typing import Callable, Optional
 
-import dm_aux as aux
 from einops import rearrange
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dac_jax.audio_utils import stft, decibel_loudness
+from dac_jax.audio_utils import stft, decibel_loudness, mel_spectrogram
 
 
 def l1_loss(y_true: jnp.ndarray,
@@ -132,7 +131,7 @@ def generator_loss(fake, real):
     loss_feature = 0
 
     for i in range(len(d_fake)):
-        for j in range(len(d_fake[i]) - 1):
+        for j in range(len(d_fake[i])):
             loss_feature = loss_feature + l1_loss(d_fake[i][j], d_real[i][j])
     return loss_g, loss_feature
 
@@ -304,12 +303,14 @@ def mel_spectrogram_loss(y_true: jnp.ndarray,
             spectrogram = jnp.abs(stft_data)
             return spectrogram
 
-        mel_fun = partial(aux.spectral.mel_spectrogram, log_scale=False, sample_rate=sample_rate,
-                          frame_length=frame_length, num_features=features, lower_edge_hertz=fmin,
-                          upper_edge_hertz=fmax)
-
         x_spectrogram = spectrogram_fn(x)
         y_spectrogram = spectrogram_fn(y)
+
+        nf = x_spectrogram.shape[-1]
+
+        mel_fun = partial(mel_spectrogram, log_scale=False, sample_rate=sample_rate,
+                          frame_length=2 * (nf - 1), num_features=features, lower_edge_hertz=fmin,
+                          upper_edge_hertz=fmax)
 
         x_mels = mel_fun(x_spectrogram)
         y_mels = mel_fun(y_spectrogram)
