@@ -203,7 +203,6 @@ def mel_spectrogram(
 
 
 def decibel_loudness(stft_data: jnp.ndarray, clamp_eps=1e-5, pow=2.) -> jnp.ndarray:
-    # todo: maybe do maximum right before log10
     return jnp.log10(jnp.power(jnp.maximum(jnp.abs(stft_data), clamp_eps), pow))
 
 
