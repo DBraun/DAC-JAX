@@ -151,7 +151,8 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
                 groups.append(filepaths)
             else:
                 raise RuntimeError(f"Group '{group_name}' is empty. "
-                                   f"The number of specified folders was {len(folders)}.")
+                                   f"The number of specified folders was {len(folders)}. "
+                                   f"The approved file extensions were {extensions}.")
 
         self._group_to_len = {i: len(group) for i, group in enumerate(groups)}
         self._groups = groups
