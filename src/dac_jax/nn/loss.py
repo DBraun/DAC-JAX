@@ -114,6 +114,8 @@ def discriminator_loss(fake, real):
     for x_fake, x_real in zip(d_fake, d_real):
         loss_d = loss_d + jnp.square(x_fake[-1]).mean()
         loss_d = loss_d + jnp.square(1 - x_real[-1]).mean()
+    # todo: we should probably normalize based on the number of feature maps, but the original DAC doesn't do this.
+    # loss_d = loss_d / len(d_fake)
     return loss_d
 
 
@@ -128,11 +130,18 @@ def generator_loss(fake, real):
     for x_fake in d_fake:
         loss_g = loss_g + jnp.square(1 - x_fake[-1]).mean()
 
+    # todo: we should probably normalize based on the number of feature maps, but the original DAC doesn't do this.
+    # loss_g = loss_g / len(d_fake)
+
     loss_feature = 0
 
     for i in range(len(d_fake)):
         for j in range(len(d_fake[i])):
             loss_feature = loss_feature + l1_loss(d_fake[i][j], d_real[i][j])
+
+    # todo: we should probably normalize based on the number of feature maps, but the original DAC doesn't do this.
+    # loss_feature = loss_feature / sum([len(d_fake[i]) for i in range(len(d_fake))])
+
     return loss_g, loss_feature
 
 
