@@ -82,8 +82,8 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
             sample_rate: int = 44100,
             mono: int = 1,
             duration: float = 1.,
-            extensions=None,
-            num_steps=None,
+            extensions: List[str] = None,
+            num_steps: int = None,
             saliency_params: SaliencyParams = None,
     ):
 
@@ -129,7 +129,7 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
             sample_rate: int = 44100,
             mono: int = 1,
             duration: float = 1.,
-            extensions=None,
+            extensions: List[str] = None,
             saliency_params: SaliencyParams = None,
     ):
 
@@ -151,7 +151,7 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
                 groups.append(filepaths)
             else:
                 raise RuntimeError(f"Group '{group_name}' is empty. "
-                                   f"The number of specified folders was {len(folders)}. "
+                                   f"The number of specified folders in the group was {len(folders)}. "
                                    f"The approved file extensions were {extensions}.")
 
         self._group_to_len = {i: len(group) for i, group in enumerate(groups)}
@@ -173,10 +173,10 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         x = idx % self._group_to_len[group_idx]
         y = idx // self._group_to_len[group_idx]
 
-        group = self._groups[group_idx].copy()
+        file_paths_in_group = self._groups[group_idx].copy()
 
-        Random(y+4617*group_idx).shuffle(group)  # todo: 4617 is arbitrary and could probably be zero.
+        Random(y+4617*group_idx).shuffle(file_paths_in_group)  # todo: 4617 is arbitrary and could probably be zero.
 
-        file_path = group[x]
+        file_path = file_paths_in_group[x]
 
         return self.load_audio(file_path, record_key)
