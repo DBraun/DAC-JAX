@@ -10,14 +10,15 @@ from dac_jax.audiotree import transforms as transforms_lib
 from dac_jax.audiotree.datasources import SaliencyParams, AudioDataSimpleSource, AudioDataBalancedSource
 from dac_jax.audiotree.transforms import ReduceBatchTransform
 
+
 # Transforms
 def filter_fn(fn):
     return (fn.__qualname__ != 'TfRandomMapTransform' and
             (hasattr(fn, 'random_map') or hasattr(fn, 'map') or hasattr(fn, 'np_random_map')))
 
+
 # https://github.com/pseeth/argbind/tree/main/examples/bind_module
 transforms_lib = argbind.bind_module(transforms_lib, 'train', 'val', filter_fn=filter_fn)
-
 
 SaliencyParams = argbind.bind(SaliencyParams, 'train', 'val', 'test', 'sample')
 
