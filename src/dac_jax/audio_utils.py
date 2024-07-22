@@ -146,7 +146,7 @@ def istft(stft_matrix: chex.Array,
                                                      window=window,
                                                      )
 
-    reconstructed_signal = reconstructed_signal / (frame_length / 2)
+    reconstructed_signal = reconstructed_signal / (frame_length / 2)  # undoing something done in the STFT.
 
     # Trim or pad the output signal to the desired length
     if length is not None:
@@ -166,9 +166,9 @@ def mel_spectrogram(
     log_scale: bool = True,
     sample_rate: int = 16000,
     frame_length: Optional[int] = 2048,
-    num_features: int = 64,
-    lower_edge_hertz: float = 80.0,
-    upper_edge_hertz: Optional[float] = 7600.0,
+    num_features: int = 128,
+    lower_edge_hertz: float = 0.0,
+    upper_edge_hertz: Optional[float] = None,
     ) -> chex.Array:
     """Converts the spectrograms to Mel-scale.
 

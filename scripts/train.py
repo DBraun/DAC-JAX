@@ -40,43 +40,26 @@ from flax.training.early_stopping import EarlyStopping
 from flax.training.train_state import TrainState
 from flax import jax_utils
 from flax import struct
-import grain.python as grain
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
 from dac_jax import load_model
 from dac_jax.audiotree import AudioTree
-from dac_jax.audiotree import transforms as transforms_lib
-from dac_jax.audiotree.datasources import SaliencyParams
 from dac_jax.model import DAC, Discriminator
 from dac_jax.nn.loss import l1_loss, multiscale_stft_loss, mel_spectrogram_loss, generator_loss, discriminator_loss
 
-from input_pipeline import create_audio_dataset
+from input_pipeline import create_dataset as _create_dataset
 
 warnings.filterwarnings("ignore", category=UserWarning)  # ignore librosa warnings about mel filters
-
-SaliencyParams = argbind.bind(SaliencyParams, "train", "val")
-
-
-# Transforms
-def filter_fn(fn):
-    return (fn.__qualname__ != 'TfRandomMapTransform' and
-            (hasattr(fn, 'random_map') or hasattr(fn, 'map') or hasattr(fn, 'np_random_map')))
-
-# https://github.com/pseeth/argbind/tree/main/examples/bind_module
-transforms_lib = argbind.bind_module(transforms_lib, "train", "val", filter_fn=filter_fn)
 
 # Models
 DAC = argbind.bind(DAC)
 Discriminator = argbind.bind(Discriminator)
 
-SAMPLE_RATE = DAC().sample_rate
-
 # Losses
 multiscale_stft_loss = argbind.bind(multiscale_stft_loss)
 mel_spectrogram_loss = argbind.bind(mel_spectrogram_loss)
-mel_spectrogram_loss = partial(mel_spectrogram_loss, sample_rate=SAMPLE_RATE)
 
 EarlyStopping = argbind.bind(EarlyStopping)
 
@@ -103,76 +86,6 @@ logger = get_logger()
 
 def is_process_main():
     return jax.process_index() == 0
-
-
-@argbind.bind('train', 'val', 'test')
-def build_transforms(
-        augment: list[str] = None,
-):
-    """
-    :param augment: A list of str names of Transforms (from ``audiotree.transforms``) such as VolumeNorm
-    :return: a list of instances of the Transforms.
-    """
-    def to_transform_instances(transform_classes):
-        if transform_classes is None:
-            return None
-        instances = []
-        for TransformClass in transform_classes:
-            instance = getattr(transforms_lib, TransformClass)()
-            instances.append(instance)
-        return instances
-
-    return to_transform_instances(augment)
-
-
-def prepare_for_prefetch(xs):
-    local_device_count = jax.local_device_count()
-
-    def _prepare(x):
-        return x.reshape((local_device_count, -1) + x.shape[1:])
-
-    return jax.tree_util.tree_map(_prepare, xs)
-
-
-@argbind.bind('train', 'val', 'test')
-def create_dataset(
-        transforms: list,
-        batch_size: int,
-        duration: float = 0.2,
-        sources: Mapping[str, List[str]] = None,
-        extensions: List[str] = None,
-        mono: int = 1,  # bool
-        train: int = 0,  # bool
-        num_steps: int = None,
-        seed: int = 0,
-        worker_count: int = 0,  # todo: https://github.com/google/grain/issues/495
-        prefetch_size: int = 1,
-) -> Tuple[grain.DataLoader, float]:
-
-    ds = create_audio_dataset(
-        sources=sources,
-        extensions=extensions,
-        duration=duration,
-        train=train,
-        batch_size=batch_size,
-        sample_rate=SAMPLE_RATE,
-        mono=mono,
-        seed=seed,
-        num_steps=num_steps,
-        worker_count=worker_count,
-        worker_buffer_size=1,  # set to 1 because we use jax_utils.prefetch_to_device for similar behavior.
-        transforms=transforms,
-        saliency_params=SaliencyParams(),
-    )
-
-    # similar to flax.jax_utils.replicate
-    ds = map(prepare_for_prefetch, ds)
-
-    if prefetch_size > 1:
-        # For prefetch to work, we must have already used prepare_for_prefetch
-        ds = jax_utils.prefetch_to_device(ds, size=prefetch_size)
-
-    return iter(ds), duration
 
 
 @struct.dataclass
@@ -207,6 +120,7 @@ class TrainMetrics(Collection):
 class GenDiscState(struct.PyTreeNode):
     generator: TrainState
     discriminator: TrainState
+    sample_rate: int
 
 
 @argbind.bind()
@@ -345,12 +259,12 @@ def eval_step(rng, state: GenDiscState, audio_tree: AudioTree, eval_metrics, lam
 
     audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t', c=1)
 
-    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, SAMPLE_RATE, train=False,
+    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, state.sample_rate, train=False,
                                       rngs={'rng_stream': rng})
     recons = output['audio']
 
     output['stft/loss'] = multiscale_stft_loss(audio_data, recons)
-    output['mel/loss'] = mel_spectrogram_loss(audio_data, recons)
+    output['mel/loss'] = mel_spectrogram_loss(audio_data, recons, sample_rate=state.sample_rate)
     output['waveform/loss'] = l1_loss(audio_data, recons)
 
     fake = state.discriminator.apply_fn({'params': state.discriminator.params}, recons)
@@ -374,8 +288,8 @@ def train_step_discriminator(state: GenDiscState, audio_data, output) -> Tuple[G
     def loss_fn(params):
         # note: you could calculate with the ``state.generator`` again, since its weights were just updated,
         # but we prefer not to in order to run faster.
-        # output = state.generator.apply_fn({'params': state.generator.params}, audio_data, SAMPLE_RATE, rngs=rngs,
-        #                                   train=True  # todo: maybe pick Train=False even though DAC didn't
+        # output = state.generator.apply_fn({'params': state.generator.params}, audio_data, state.sample_rate,
+        #                                   rngs=rngs, train=True  # todo: maybe pick Train=False even though DAC didn't
         #                                   )
         recons = output['audio']
 
@@ -395,6 +309,7 @@ def train_step_discriminator(state: GenDiscState, audio_data, output) -> Tuple[G
     return state, loss
 
 
+# note that we use without_prefix=True and the same lambdas is used for eval_step
 @argbind.bind(without_prefix=True)
 def train_step_generator(rng, state: GenDiscState, audio_data, lambdas: Mapping[str, float] = None) ->\
         Tuple[GenDiscState, dict]:
@@ -403,14 +318,14 @@ def train_step_generator(rng, state: GenDiscState, audio_data, lambdas: Mapping[
 
     def loss_fn(params):
 
-        output = state.generator.apply_fn({'params': params}, audio_data, SAMPLE_RATE, rngs={'rng_stream': rng})
+        output = state.generator.apply_fn({'params': params}, audio_data, state.sample_rate, rngs={'rng_stream': rng})
         recons = output['audio']
 
         fake = state.discriminator.apply_fn({'params': state.discriminator.params}, recons)
         real = state.discriminator.apply_fn({'params': state.discriminator.params}, audio_data)
 
         output['stft/loss'] = multiscale_stft_loss(audio_data, recons)
-        output['mel/loss'] = mel_spectrogram_loss(audio_data, recons)
+        output['mel/loss'] = mel_spectrogram_loss(audio_data, recons, sample_rate=state.sample_rate)
         output['waveform/loss'] = l1_loss(audio_data, recons)
         (
             output['adv/gen_loss'],
@@ -470,7 +385,7 @@ def save_samples(rng, state: GenDiscState, audio_tree: AudioTree):
     batch_size = audio_data.shape[0]
     audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t', c=1)
 
-    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, SAMPLE_RATE, train=False,
+    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, state.sample_rate, train=False,
                                       rngs={'rng_stream': rng})
     recons = output['audio']
     recons = rearrange(recons, '(b c) 1 t -> b t c', b=batch_size, c=1)
@@ -516,21 +431,22 @@ def split_device(key):
 @argbind.bind()
 def train(
         args,
-        name=None,
-        num_iterations=250_000,
-        valid_freq=100,
-        sample_freq=100,
-        ckpt_max_keep=2,
-        seed=0,
-        batch_size=4,
-        val_batch_size=1,
-        restore=False,
+        name: str = None,
+        num_iterations: int = 250_000,
+        valid_freq: int = 100,
+        sample_freq: int = 100,
+        ckpt_max_keep: int = 2,
+        seed: int = 0,
+        batch_size: int = 4,
+        val_batch_size: int = 1,
+        sample_batch_size: int = 1,
+        restore: int = 0,  # bool
         best_key='eval/loss',
         best_mode='min',
-        enable_async_checkpointing=True,
+        enable_async_checkpointing: int = 1,  # bool
         log_level='info',
         save_path='runs',
-        tabulate=0,
+        tabulate: int = 0,  # bool
 ):
 
     logging.set_verbosity(log_level.upper())  # absl logging
@@ -543,6 +459,7 @@ def train(
     # todo: or use jax.process_count()
     batch_size *= jax.device_count()
     val_batch_size *= jax.device_count()
+    sample_batch_size *= jax.device_count()
 
     if name is not None:
         workdir = os.path.join(save_path, name)
@@ -562,9 +479,19 @@ def train(
         shutil.rmtree(ckpt_dir)  # Remove any existing checkpoints from the last run.
 
     with argbind.scope(args, "train"):
-        transforms = build_transforms()
-        train_iter, duration = create_dataset(transforms, batch_size=batch_size, train=True,
-                                              num_steps=num_iterations)
+        SAMPLE_RATE = args['DAC.sample_rate']
+
+    create_dataset = partial(_create_dataset, sample_rate=SAMPLE_RATE)
+
+    with argbind.scope(args, "train"):
+        train_iter = create_dataset(batch_size=batch_size, train=True, num_steps=num_iterations)
+
+    with argbind.scope(args, "sample"):
+        # num_epochs=None so that it can iterate forever.
+        sample_iter = create_dataset(batch_size=sample_batch_size, num_epochs=None)
+
+    with argbind.scope(args, "train"):
+        duration = args['train/create_dataset.duration']
 
     n_channels = 1
     shape = (local_batch_size, n_channels, round(SAMPLE_RATE * duration))
@@ -583,7 +510,7 @@ def train(
     discriminator_state = create_discriminator(subkey, shape, create_discriminator_optimizer(discriminator_schedule),
                                                tabulate)
 
-    state = GenDiscState(generator=generator_state, discriminator=discriminator_state)
+    state = GenDiscState(generator=generator_state, discriminator=discriminator_state, sample_rate=SAMPLE_RATE)
 
     state = jax_utils.replicate(state)
     train_metrics = jax_utils.replicate(TrainMetrics.empty())
@@ -598,7 +525,7 @@ def train(
         directory=ckpt_dir + '/orbax/managed',
         options=ocp.CheckpointManagerOptions(save_interval_steps=1, max_to_keep=ckpt_max_keep, best_fn=best_fn,
                                              best_mode=best_mode,
-                                             enable_async_checkpointing=enable_async_checkpointing),
+                                             enable_async_checkpointing=bool(enable_async_checkpointing)),
         item_handlers=ocp.StandardCheckpointHandler()
     )
 
@@ -630,9 +557,8 @@ def train(
             with report_progress.timed("load_train_batch"):
                 batch = next(train_iter)
 
-            key, subkey = random.split(key)
-
             with report_progress.timed("train_step"):
+                key, subkey = random.split(key)
                 state, train_metrics = train_step(split_device(subkey), state, train_metrics, batch, step,
                                                   generator_schedule, discriminator_schedule)
 
@@ -642,37 +568,33 @@ def train(
             train_metrics = log_training(train_metrics, step, writer)
 
             if step % sample_freq == 0:
-                # Note: right now save_iter is just the validation dataset.
-                # We perform reconstruction and save the input and output to WAV, which shows in tensorboard.
-                # todo: we are just taking a single batch from the validation set. This could change.
-                with argbind.scope(args, "val"):
-                    transforms = build_transforms()
-                    save_iter, _ = create_dataset(transforms, batch_size=val_batch_size)
+                with report_progress.timed("sample_step"):
+                    all_signal = []
+                    all_recons = []
+                    for _ in range(2):  # todo: argbind the 2 parameter
+                        save_batch = next(sample_iter)
+                        key, subkey = random.split(key)
+                        recons = save_samples(split_device(subkey), state, save_batch)
+                        recons = jax_utils.unreplicate(recons)
+                        save_batch = jax_utils.unreplicate(save_batch)
+                        signal = rearrange(save_batch.audio_data, 'b c t -> b t c', c=1)
+                        assert recons.ndim == 3
+                        all_signal.append(np.array(signal))
+                        all_recons.append(np.array(recons))
 
-                save_batch = next(save_iter)
-                recons = save_samples(split_device(subkey), state, save_batch)
-                recons = jax_utils.unreplicate(recons)
-                save_batch = jax_utils.unreplicate(save_batch)
-                signal = rearrange(save_batch.audio_data, 'b c t -> b t c', c=1)
-                assert recons.ndim == 3
-
-                writer.write_audios(step=step,
-                                    audios={
-                                        'signal': np.array(signal),
-                                        'recons': np.array(recons),
-                                    },
-                                    sample_rate=SAMPLE_RATE)
-                writer.flush()
+                    writer.write_audios(step=step,
+                                        audios={
+                                            'signal': np.concatenate(all_signal, axis=0),
+                                            'recons': np.concatenate(all_recons, axis=0),
+                                        },
+                                        sample_rate=SAMPLE_RATE)
+                    writer.flush()
 
             if step % valid_freq == 0:
                 # Compute metrics on the validation set
                 with report_progress.timed("eval_step"):
-
                     with argbind.scope(args, "val"):
-                        # todo: don't recreate the eval dataset multiple times
-                        transforms = build_transforms()
-                        eval_iter, _ = create_dataset(transforms, batch_size=val_batch_size)
-
+                        eval_iter = create_dataset(batch_size=val_batch_size)
                     ran_once = False
                     for test_batch in eval_iter:
                         ran_once = True

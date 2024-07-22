@@ -41,13 +41,18 @@ create_discriminator_optimizer.grad_clip: 10
 
 lambdas:
   mel/loss: 15.0
-  adv/feat_loss: 2.0
-  adv/gen_loss: 1.0
+  adv/feat_loss: .02  # 2.0 / (5+5+5+5+5+25+25+25) = 2.0 / 100
+                      # note that 5 is (6-1) where 6 is number of convs in MPD. Then there are 5 of these because the
+                      # number of periods is 5.
+                      # 25 is number of bands (5) times the number of convs (5) in MRD. Then there are 3 of these
+                      # because of the number of fft sizes is 3.
+  adv/gen_loss: 0.125  # 1.0 / 8 where 8 is number of Discriminator rates+periods+fft sizes = (0+5+3)
   vq/commitment_loss: 0.25
   vq/codebook_loss: 1.0
 
 train.batch_size: 72
 train.val_batch_size: 100
+train.sample_batch_size: 100
 train.num_iterations: 250000
 train.valid_freq: 1000
 train.sample_freq: 10000
@@ -84,6 +89,10 @@ val/build_transforms.augment:
   - VolumeNorm
   - RescaleAudio
 
+sample/build_transforms.augment:
+  - VolumeNorm
+  - RescaleAudio
+
 # Data
 # See salient_excerpt in Descript AudioTools.
 train/SaliencyParams.enabled: 1
@@ -91,9 +100,18 @@ train/SaliencyParams.num_tries: 8
 train/SaliencyParams.loudness_cutoff: -40
 
 # Data
+create_dataset.extensions:
+  - .wav
+  - .flac
+  - .ogg
+  - .mp3
+
 train/create_dataset.duration: 0.38
 val/create_dataset.duration: 5.0
+sample/create_dataset.duration: 5.0
 test/create_dataset.duration: 10.0
+
+val/create_dataset.num_steps: 4
 
 train/create_dataset.sources:
   speech_fb:
@@ -118,6 +136,14 @@ train/create_dataset.sources:
     - /data/audioset/data/balanced_train_segments/
 
 val/create_dataset.sources:
+  speech_hq:
+    - /data/daps/val
+  music_hq:
+    - /data/musdb/test
+  general:
+    - /data/audioset/data/eval_segments/
+
+sample/create_dataset.sources:
   speech_hq:
     - /data/daps/val
   music_hq:

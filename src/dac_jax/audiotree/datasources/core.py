@@ -98,19 +98,27 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
 
         filepaths = []
         for group_name, folders in sources.items():
+            filepaths_in_group = []
             for folder in folders:
-                filepaths += _find_files_with_extensions(folder, extensions=extensions)
+                filepaths_in_group += _find_files_with_extensions(folder, extensions=extensions)
+
+            if filepaths_in_group:
+                filepaths += filepaths_in_group
+            else:
+                raise RuntimeError(f"Group '{group_name}' is empty. "
+                                   f"The number of specified folders in the group was {len(folders)}. "
+                                   f"The approved file extensions were {extensions}.")
 
         if num_steps is not None:
             filepaths = filepaths[:num_steps]
 
         self._file_paths = filepaths
 
-        self._num_steps = len(filepaths)
-        assert self._num_steps > 0
+        self._length = len(filepaths)
+        assert self._length > 0
 
     def __len__(self) -> int:
-        return self._num_steps
+        return self._length
 
     def __getitem__(self, record_key: SupportsIndex):
         file_path = self._file_paths[record_key]
@@ -159,11 +167,11 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         self._group_to_len = {i: len(group) for i, group in enumerate(groups)}
         self._groups = groups
         self._num_groups = len(groups)
-        self._num_steps = num_steps
-        assert self._num_steps > 0
+        self._length = num_steps
+        assert self._length > 0
 
     def __len__(self) -> int:
-        return self._num_steps
+        return self._length
 
     def __getitem__(self, record_key: SupportsIndex):
         record_key = int(record_key)

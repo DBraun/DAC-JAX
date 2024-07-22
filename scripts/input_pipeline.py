@@ -1,29 +1,78 @@
+import argbind
+
 from typing import List, Mapping
 
+from flax import jax_utils
 import grain.python as grain
+import jax
 
+from dac_jax.audiotree import transforms as transforms_lib
 from dac_jax.audiotree.datasources import SaliencyParams, AudioDataSimpleSource, AudioDataBalancedSource
 from dac_jax.audiotree.transforms import ReduceBatchTransform
 
+# Transforms
+def filter_fn(fn):
+    return (fn.__qualname__ != 'TfRandomMapTransform' and
+            (hasattr(fn, 'random_map') or hasattr(fn, 'map') or hasattr(fn, 'np_random_map')))
 
-def create_audio_dataset(
-        sources: Mapping[str, List[str]],
-        extensions=None,
-        duration: float = 1.,
-        train: int = 1,
-        batch_size: int = 4,
-        sample_rate: int = 44100,
-        mono: int = 1,
-        seed: int = 0,
-        num_steps: int = None,
-        worker_count: int = 0,
-        worker_buffer_size: int = 1,
-        transforms=None,
-        saliency_params: SaliencyParams = None,
-        enable_profiling=False,
+# https://github.com/pseeth/argbind/tree/main/examples/bind_module
+transforms_lib = argbind.bind_module(transforms_lib, 'train', 'val', filter_fn=filter_fn)
+
+
+SaliencyParams = argbind.bind(SaliencyParams, 'train', 'val', 'test', 'sample')
+
+
+@argbind.bind('train', 'val', 'test', 'sample')
+def build_transforms(
+        augment: list[str] = None,
 ):
+    """
+    :param augment: A list of str names of Transforms (from ``audiotree.transforms``) such as VolumeNorm
+    :return: a list of instances of the Transforms.
+    """
+    def to_transform_instances(transform_classes):
+        if transform_classes is None:
+            return None
+        instances = []
+        for TransformClass in transform_classes:
+            instance = getattr(transforms_lib, TransformClass)()
+            instances.append(instance)
+        return instances
+
+    return to_transform_instances(augment)
+
+
+def prepare_for_prefetch(xs):
+    local_device_count = jax.local_device_count()
+
+    def _prepare(x):
+        return x.reshape((local_device_count, -1) + x.shape[1:])
+
+    return jax.tree_util.tree_map(_prepare, xs)
+
+
+@argbind.bind('train', 'val', 'test', 'sample')
+def create_dataset(
+        batch_size: int,
+        sample_rate: int,
+        duration: float = 0.2,
+        sources: Mapping[str, List[str]] = None,
+        extensions: List[str] = None,
+        mono: int = 1,  # bool
+        train: int = 0,  # bool
+        num_steps: int = None,
+        seed: int = 0,
+        worker_count: int = 0,  # todo: https://github.com/google/grain/issues/495
+        prefetch_size: int = 1,
+        enable_profiling=False,
+        num_epochs: int = 1,  # for train/val use 1, but for sample set it to None so that it loops forever.
+) -> grain.DataLoader:
 
     assert sources is not None
+
+    saliency_params = SaliencyParams()  # rely on argbind
+
+    transforms = build_transforms()  # rely on argbind
 
     if train:
         assert num_steps is not None and num_steps > 0
@@ -47,12 +96,13 @@ def create_audio_dataset(
         )
 
     index_sampler = grain.IndexSampler(
-      num_records=len(datasource),
-      num_epochs=1,
-      shard_options=grain.NoSharding(),
-      shuffle=False,  # Keep shuffling off. AudioDataBalancedSource already does the shuffling deterministically,
-                      #  and AudioDataSimpleSource doesn't need shuffling.
-      seed=seed,
+        num_records=len(datasource),
+        num_epochs=num_epochs,
+        shard_options=grain.NoSharding(),
+        shuffle=not train,  # Keep shuffling off for training, which uses AudioDataBalancedSource.
+                            # AudioDataBalancedSource already does the shuffling deterministically, and turning it on
+                            # here would actually BREAK the locality of the balancing between batches.
+        seed=seed,
     )
 
     pygrain_ops = [
@@ -68,9 +118,18 @@ def create_audio_dataset(
         sampler=index_sampler,
         operations=pygrain_ops,
         worker_count=worker_count,
-        worker_buffer_size=worker_buffer_size,
+        worker_buffer_size=1,  # set to 1 because we use jax_utils.prefetch_to_device for similar behavior.
         enable_profiling=enable_profiling,
     )
+
+    # similar to flax.jax_utils.replicate
+    batched_dataloader = map(prepare_for_prefetch, batched_dataloader)
+
+    if prefetch_size > 1:
+        # For prefetch to work, we must have already used prepare_for_prefetch
+        batched_dataloader = jax_utils.prefetch_to_device(batched_dataloader, size=prefetch_size)
+
+    batched_dataloader = iter(batched_dataloader)
 
     return batched_dataloader
 
@@ -93,7 +152,7 @@ if __name__ == '__main__':
 
     num_steps = 1000
 
-    ds = create_audio_dataset(
+    ds = create_dataset(
         sources=sources,
         duration=0.5,
         train=True,
