@@ -140,8 +140,7 @@ def generator_loss(fake, real):
             loss_feature = loss_feature + l1_loss(d_fake[i][j], d_real[i][j])
 
     # We normalize based on the number of feature maps, but the original DAC doesn't do this.
-    denom = sum([len(d_fake[i])-1 for i in range(len(d_fake))])
-    loss_feature = loss_feature / denom
+    loss_feature = loss_feature / sum([len(d_fake[i])-1 for i in range(len(d_fake))])
 
     return loss_g, loss_feature
 
