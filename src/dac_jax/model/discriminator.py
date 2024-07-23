@@ -11,16 +11,16 @@ from dac_jax.nn.layers import LeakyReLU
 
 
 def disc_WNConv1d(*args, act=True, **kwargs):
-    # Note, don't use the truncated normal initializer,
-    # which seems to be what's used in the Encoder/Decoder/Quantizer.
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=nn.initializers.kaiming_uniform()))]
+    kernel_init = nn.initializers.variance_scaling(1/3, "fan_in", "uniform")  # same as PyTorch
+    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=kernel_init))]
     if act:
         layers.append(LeakyReLU(0.1))
     return nn.Sequential(layers)
 
 
 def WNConv2d(*args, act=True, **kwargs):
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=nn.initializers.kaiming_uniform()))]
+    kernel_init = nn.initializers.variance_scaling(1/3, "fan_in", "uniform")  # same as PyTorch?
+    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=kernel_init))]
     if act:
         layers.append(LeakyReLU(0.1))
     return nn.Sequential(layers)

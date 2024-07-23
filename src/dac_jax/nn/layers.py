@@ -74,9 +74,6 @@ class LeakyReLU(nn.Module):
 
 class WNConv1d(nn.Module):
 
-    # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
-    # kernel_init: nn.initializers.variance_scaling(.02, mode='fan_in', distribution='truncated_normal', dtype=jnp.float32)
-
     features: int
     kernel_size: Union[int, Sequence[int]]
     strides: Union[None, int, Sequence[int]] = 1
@@ -148,7 +145,7 @@ class WNConvTranspose1d(nn.Module):
     dtype: Optional[Dtype] = None
     param_dtype: Dtype = jnp.float32
     precision: PrecisionLike = None
-    kernel_init: Initializer = nn.initializers.kaiming_uniform()  # to match PyTorch
+    kernel_init: Initializer = nn.initializers.variance_scaling(1/3, "fan_out", "uniform")  # to match PyTorch
     bias_init: Initializer = nn.initializers.zeros_init()
     transpose_kernel = True  # note: non-standard
 
