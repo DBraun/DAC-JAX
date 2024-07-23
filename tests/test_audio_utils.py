@@ -44,7 +44,7 @@ def test_stft_equivalence(match_stride: bool, hop_factor: float, length: int):
     stft_data = stft_fun(audio_data)
     stft_data2 = stft_fun_scipy(audio_data)
 
-    assert jnp.allclose(stft_data, stft_data2, atol=1e-4)
+    assert jnp.allclose(np.array(stft_data), np.array(stft_data2), atol=1e-4)
 
 
 @pytest.mark.parametrize("hop_factor,length", product(
