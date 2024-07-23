@@ -1,86 +1,24 @@
-from functools import partial
 from itertools import product
 
 from einops import rearrange
 import jax.numpy as jnp
-import jax.random as random
 import numpy as np
 import pytest
 
-from dac_jax.audio_utils import stft, istft, mel_spectrogram
+from dac_jax.audio_utils import stft, mel_spectrogram
 from dac_jax.nn.loss import mel_spectrogram_loss, multiscale_stft_loss
 
 from dac.nn.loss import MelSpectrogramLoss, MultiScaleSTFTLoss
 from audiotools import AudioSignal
 
 
-@pytest.mark.parametrize("match_stride,hop_factor,length", product(
+@pytest.mark.parametrize("match_stride,hop_factor,length,use_scipy", product(
     [False, True],
     [0.25, 0.5],
     [44100, 44101],
+    [False, True],
 ))
-def test_stft_equivalence(match_stride: bool, hop_factor: float, length: int):
-
-    # Test that use_scipy=True produces the same result as use_scipy=False
-
-    if hop_factor == 0.5 and match_stride:
-        return  # for some reason DAC torch disallows this
-
-    audio_data = random.uniform(random.key(0), shape=(2, 1, length), minval=-1)
-
-    frame_length = 2048
-    window = 'hann'
-
-    stft_fun = partial(stft,
-                       frame_length=frame_length,
-                       hop_factor=hop_factor,
-                       window=window,
-                       match_stride=match_stride,
-                       padding_type='reflect',
-                       )
-
-    stft_fun_scipy = partial(stft_fun, use_scipy=True)
-
-    stft_data = stft_fun(audio_data)
-    stft_data2 = stft_fun_scipy(audio_data)
-
-    assert jnp.allclose(np.array(stft_data), np.array(stft_data2), atol=1e-4)
-
-
-@pytest.mark.parametrize("hop_factor,length", product(
-    [0.25, 0.5],
-    [44100, 44101],
-))
-def test_istft_invariance(hop_factor: float, length: int):
-
-    # Show that it's possible to use STFT, then ISTFT and recover the input.
-
-    audio_data = random.uniform(random.key(0), shape=(2, 1, length), minval=-1)
-
-    frame_length = 2048
-    window = 'hann'
-
-    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, match_stride=False,
-                       padding_type='reflect', use_scipy=True)
-
-    frame_step = int(frame_length * hop_factor)
-    noverlap = frame_length - frame_step
-
-    istft_fun = partial(istft, frame_length=frame_length, noverlap=noverlap, window=window, length=length)
-
-    stft_data = stft_fun(audio_data)
-
-    recons = istft_fun(stft_data)
-
-    assert jnp.allclose(recons, audio_data, atol=1e-6)
-
-
-@pytest.mark.parametrize("match_stride,hop_factor,length", product(
-    [True],  # todo: need to test match_stride=False
-    [0.25, 0.5],
-    [44100, 44101],
-))
-def test_mel_same_as_audiotools(match_stride: bool, hop_factor: float, length: int):
+def test_mel_same_as_audiotools(match_stride: bool, hop_factor: float, length: int, use_scipy: bool):
 
     if hop_factor == 0.5 and match_stride:
         return  # for some reason DAC torch disallows this
@@ -115,7 +53,6 @@ def test_mel_same_as_audiotools(match_stride: bool, hop_factor: float, length: i
                      window=stft_kwargs['window_type'],
                      match_stride=stft_kwargs['match_stride'],
                      padding_type=stft_kwargs['padding_type'],
-                     use_scipy=False,
                      )
 
     assert np.allclose(np.abs(stft1), np.abs(stft_data), atol=1e-4)
@@ -129,7 +66,7 @@ def test_mel_same_as_audiotools(match_stride: bool, hop_factor: float, length: i
 
     mel2 = rearrange(mel2, '(b c) t bins -> b c bins t', b=B)
 
-    assert np.allclose(np.array(mel2), mel1, atol=1e-4)
+    assert np.allclose(mel1, np.array(mel2), atol=1e-4)
 
 
 @pytest.mark.parametrize("length",
@@ -148,7 +85,7 @@ def test_mel_loss_same_as_dac_torch(length: int):
     loss1 = mel_spectrogram_loss(jnp.array(x1), jnp.array(x2), sample_rate=sample_rate)
     loss2 = MelSpectrogramLoss()(signal1, signal2)
 
-    assert np.isclose(np.array(loss1), loss2, atol=1e-3)  # todo: better atol
+    assert np.isclose(np.array(loss1), loss2)
 
 @pytest.mark.parametrize("length",
     (44100, 44101),
@@ -165,4 +102,14 @@ def test_multiscale_stft_loss_same_as_dac_torch(length: int):
     loss1 = multiscale_stft_loss(jnp.array(x1), jnp.array(x2))
     loss2 = MultiScaleSTFTLoss()(signal1, signal2)
 
-    assert np.isclose(np.array(loss1), loss2, atol=1e-2)  # todo: better atol
+    assert np.isclose(np.array(loss1), loss2)
+
+
+if __name__ == '__main__':
+    # test_mel_same_as_audiotools()
+    # test_mel_loss_same_as_dac_torch()
+    # test_multiscale_stft_loss_same_as_dac_torch()
+    # test_stft_equivalence(True)
+    # test_stft_equivalence(False)
+    # test_stft_equivalence2(0.5)
+    test_mel_same_as_audiotools(False, 0.25, 44100)

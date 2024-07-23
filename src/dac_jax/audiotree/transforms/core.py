@@ -7,7 +7,10 @@ https://github.com/descriptinc/audiotools/blob/master/LICENSE
 """
 
 from functools import partial
+from typing import Optional, Tuple, Union
 
+import chex
+from einops import rearrange
 import jax
 import jax.numpy as jnp
 import jax.random as random
@@ -16,8 +19,50 @@ import numpy as np
 from grain._src.core.transforms import TfRandomMapTransform
 import grain.python as grain
 
-from dac_jax.audio_utils import stft, istft
 from dac_jax.audiotree import AudioTree
+
+
+def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann'):
+
+    batch_size, num_channels, audio_length = x.shape
+
+    frame_step = int(frame_length * hop_factor)
+
+    x = rearrange(x, 'b c t -> (b c) t')
+
+    # This probably uses less memory than the aux method, but it's definitely slower than aux.
+    _, _, stft_data = jax.scipy.signal.stft(x,
+                                            window=window,
+                                            nperseg=frame_length,
+                                            noverlap=(frame_length - frame_step),
+                                            # padded=False,
+                                            # boundary='even',
+                                            )
+    stft_data = rearrange(stft_data, '(b c) nf nt -> b c nf nt', b=batch_size)
+
+    return stft_data
+
+
+def istft(stft_matrix: chex.Array,
+          noverlap: int,
+          window: Optional[Union[str, float, Tuple[str, float]]] = 'hann',
+          length: Optional[int] = None) -> chex.Array:
+    _, reconstructed_signal = jax.scipy.signal.istft(stft_matrix,
+                                                     noverlap=noverlap,
+                                                     window=window,
+                                                     )
+
+    # Trim or pad the output signal to the desired length
+    if length is not None:
+        if length > reconstructed_signal.shape[-1]:
+            # Pad the signal if it is shorter than the desired length
+            pad_width = length - reconstructed_signal.shape[-1]
+            reconstructed_signal = jnp.pad(reconstructed_signal, ((0, 0), (0, 0), (0, pad_width)), mode='constant')
+        else:
+            # Trim the signal if it is longer than the desired length
+            reconstructed_signal = reconstructed_signal[..., :length]
+
+    return reconstructed_signal
 
 
 class Identity(grain.MapTransform):
@@ -211,11 +256,12 @@ class SwapStereo(grain.RandomMapTransform):
         return _swap_stereo_audio_transform(audio_tree, subkey, self.prob)
 
 
-@partial(jax.jit, donate_argnums=0, static_argnums=(2, 3, 4, 5))
+@partial(jax.jit, donate_argnums=0, static_argnums=(2, 3, 4, 5, 6))
 def _corrupt_phase(
         audio_tree: AudioTree,
         rng: jnp.ndarray,
         p: float,
+        amount: float,
         hop_factor: float = 0.5,
         frame_length: float = 2048,
         window: str = 'hann',
@@ -223,13 +269,15 @@ def _corrupt_phase(
     audio_data = audio_tree.audio_data
     B, C, length = audio_data.shape
 
-    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, match_stride=False,
-                       padding_type='reflect', use_scipy=True)
-    istft_fun = partial(istft, window=window, length=length)
+    frame_step = int(frame_length * hop_factor)
+    noverlap = frame_length - frame_step
+
+    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window)
+    istft_fun = partial(istft, noverlap=noverlap, window=window, length=length)
 
     stft_data = stft_fun(audio_data)
 
-    amt = random.uniform(rng, shape=stft_data.shape[:-1], minval=-jnp.pi, maxval=jnp.pi)
+    amt = random.uniform(rng, shape=stft_data.shape[:-1], minval=-jnp.pi*amount, maxval=jnp.pi*amount)
 
     stft_data = stft_data * jnp.expand_dims(jnp.exp(1j * amt), axis=-1)
     shifted = istft_fun(stft_data)
@@ -255,9 +303,8 @@ def _shift_phase(
     frame_step = int(frame_length * hop_factor)
     noverlap = frame_length - frame_step
 
-    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, match_stride=False,
-                       padding_type='reflect', use_scipy=True)
-    istft_fun = partial(istft, frame_length=frame_length, noverlap=noverlap, window=window, length=length)
+    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window)
+    istft_fun = partial(istft, noverlap=noverlap, window=window, length=length)
 
     stft_data = stft_fun(audio_data)
 
@@ -275,21 +322,23 @@ def _shift_phase(
 
 class CorruptPhase(grain.RandomMapTransform):
 
-    def __init__(self, prob: float = 1):
+    def __init__(self, amount: float = 1, prob: float = 1):
         """
-        With a probability ``prob``, perform a phase shift on the audio
+        With a probability ``prob``, perform a phase corruption on the audio. The phase shift range is in the range
+         [-pi * amount, pi * amount], and it's independently selected for each frequency in the STFT.
 
         :param p: The probability between 0 and 1 of swapping stereo channels.
         """
         assert 0 <= prob <= 1
         self.prob = prob
+        self.amount = amount
 
     def random_map(self, audio_tree: AudioTree, rng: np.random.Generator) -> AudioTree:
         if self.prob == 0:
             return audio_tree
 
         subkey = random.key(rng.integers(2 ** 63))
-        return _corrupt_phase(audio_tree, subkey, self.prob)
+        return _corrupt_phase(audio_tree, subkey, self.prob, self.amount)
 
 
 class ShiftPhase(grain.RandomMapTransform):
@@ -303,7 +352,7 @@ class ShiftPhase(grain.RandomMapTransform):
         """
         assert 0 <= prob <= 1
         self.prob = prob
-        self.amount = 1
+        self.amount = amount
 
     def random_map(self, audio_tree: AudioTree, rng: np.random.Generator) -> AudioTree:
         if self.prob == 0:

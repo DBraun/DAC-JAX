@@ -72,15 +72,14 @@ def compute_stft_padding(length, window_length: int, hop_length: int, match_stri
         right_pad = math.ceil(length / hop_length) * hop_length - length
         pad = (window_length - hop_length) // 2
     else:
-        right_pad = math.ceil(length/hop_length)*hop_length-length  # note: this is different from audiotools
-        # right_pad = 0
+        right_pad = 0
         pad = 0
 
     return right_pad, pad
 
 
 def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', match_stride=False,
-         padding_type: str = 'reflect', use_scipy=False):
+         padding_type: str = 'reflect'):
 
     """Reference:
     https://github.com/descriptinc/audiotools/blob/7776c296c711db90176a63ff808c26e0ee087263/audiotools/core/audio_signal.py#L1123
@@ -95,74 +94,21 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
 
     x = rearrange(x, 'b c t -> (b c) t')
 
-    if use_scipy:
-        # This probably uses less memory than the aux method, but it's definitely slower than aux.
-        _, _, stft_data = jax.scipy.signal.stft(x,
-                                                window=window,
-                                                nperseg=frame_length,
-                                                noverlap=(frame_length - frame_step),
-                                                padded=match_stride,
-                                                boundary='even' if match_stride else 'zeros',
-                                                )
-        stft_data = rearrange(stft_data, '(b c) nf nt -> b c nf nt', b=batch_size)
-        stft_data = stft_data * (frame_length / 2)  # note that we undo this in istft.
-    else:
-        # todo: https://github.com/google-deepmind/dm_aux/issues/2
-        stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window,
-                                      pad_mode='constant', pad=aux.spectral.Pad.BOTH)
-        stft_data = rearrange(stft_data, '(b c) nt nf -> b c nf nt', b=batch_size)
+    # todo: https://github.com/google-deepmind/dm_aux/issues/2
+    stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window,
+                                  pad_mode=padding_type, pad=aux.spectral.Pad.BOTH)
+    stft_data = rearrange(stft_data, '(b c) nt nf -> b c nf nt', b=batch_size)
 
     if match_stride:
         # Drop first two and last two frames, which are added
         # because of padding. Now num_frames * hop_length = num_samples.
-        stft_data = stft_data[..., 2:-2]
+        if hop_factor == 0.25:
+            stft_data = stft_data[..., 2:-2]
+        else:
+            # I think this would be correct if DAC torch ever allowed match_stride==True and hop_factor==0.5
+            stft_data = stft_data[..., 1:-1]
 
     return stft_data
-
-
-def istft(stft_matrix: chex.Array,
-          frame_length: int,
-          noverlap: int,
-          window: Optional[Union[str, float, Tuple[str, float]]] = 'hann',
-          length: Optional[int] = None) -> chex.Array:
-    """
-    Computes the inverse Short-time Fourier Transform (iSTFT) of the signal using jax.scipy.signal.istft.
-
-    Args:
-        stft_matrix: input complex matrix of shape [batch_size, num_frames, n_fft // 2 + 1].
-        frame_length: the size of each signal frame. If unspecified it defaults to be equal to `n_fft`.
-        frame_step: the hop size of extracting signal frames. If unspecified it defaults to be equal to `int(frame_length // 2)`.
-        window: applied to each frame to remove the discontinuities at the edge of the frame introduced by segmentation.
-        pad: pad the signal at the end(s) by `int(n_fft // 2)`. Can either be `Pad.NONE`, `Pad.START`, `Pad.END`, `Pad.BOTH`, `Pad.ALIGNED`.
-        length: the trim length of the time domain signal to output.
-        precision: precision of the convolution. Either `None`, which means the default precision for the backend, or a `lax.Precision` enum value.
-
-    Returns:
-        The reconstructed time domain signal of shape `[batch_size, signal_length]`.
-
-    Reference:
-    https://github.com/descriptinc/audiotools/blob/7776c296c711db90176a63ff808c26e0ee087263/audiotools/core/audio_signal.py#L1214
-    """
-    # Compute iSTFT
-    _, reconstructed_signal = jax.scipy.signal.istft(stft_matrix,
-                                                     noverlap=noverlap,
-                                                     window=window,
-                                                     boundary=True,
-                                                     )
-
-    reconstructed_signal = reconstructed_signal / (frame_length / 2)  # undoing something done in the STFT.
-
-    # Trim or pad the output signal to the desired length
-    if length is not None:
-        if length > reconstructed_signal.shape[-1]:
-            # Pad the signal if it is shorter than the desired length
-            pad_width = length - reconstructed_signal.shape[-1]
-            reconstructed_signal = jnp.pad(reconstructed_signal, ((0, 0), (0, 0), (0, pad_width)), mode='constant')
-        else:
-            # Trim the signal if it is longer than the desired length
-            reconstructed_signal = reconstructed_signal[..., :length]
-
-    return reconstructed_signal
 
 
 def mel_spectrogram(

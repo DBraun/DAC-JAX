@@ -11,8 +11,8 @@ from flax.typing import (
 )
 import jax
 import jax.numpy as jnp
-import jax.random as random
-from jax._src.core import as_named_shape
+
+from .weight_norm import MyWeightNorm
 
 
 def default_stride(strides):
@@ -91,7 +91,7 @@ class WNConv1d(nn.Module):
     precision: PrecisionLike = None
     # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
     # https://github.com/google/flax/issues/4091
-    kernel_init: nn.initializers.Initializer = jax.nn.initializers.truncated_normal(.02, lower=-4, upper=4)
+    kernel_init: nn.initializers.Initializer = jax.nn.initializers.truncated_normal(.02, lower=-2/.02, upper=2/.02)
     bias_init: nn.initializers.Initializer = nn.initializers.zeros
 
     @nn.compact
@@ -112,8 +112,9 @@ class WNConv1d(nn.Module):
             kernel_init=self.kernel_init,
             bias_init=self.bias_init
         )
-        # It was hard to figure out that this was the right scale_init to match what was done in PyTorch DAC.
-        block = nn.WeightNorm(conv, scale_init=nn.initializers.constant(jnp.sqrt(3)/3))
+        # MyWeightNorm initializes itself as if the conv had been initialized the way PyTorch would have instead
+        # of what we did (truncated normal).
+        block = MyWeightNorm(conv)
         x = block(x)
         return x
 
