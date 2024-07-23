@@ -120,7 +120,6 @@ class TrainMetrics(Collection):
 class GenDiscState(struct.PyTreeNode):
     generator: TrainState
     discriminator: TrainState
-    sample_rate: int
 
 
 @argbind.bind()
@@ -248,9 +247,9 @@ def create_discriminator(
     return state
 
 
-@partial(jax.pmap, axis_name='ensemble', donate_argnums=3)
+@partial(jax.pmap, axis_name='ensemble', donate_argnums=3, static_broadcasted_argnums=(4,))
 @argbind.bind(without_prefix=True)
-def eval_step(rng, state: GenDiscState, audio_tree: AudioTree, eval_metrics, lambdas: Mapping[str, float] = None)\
+def eval_step(rng, state: GenDiscState, audio_tree: AudioTree, eval_metrics, sample_rate, lambdas: Mapping[str, float] = None)\
         -> EvalMetrics:
 
     assert lambdas is not None
@@ -259,12 +258,12 @@ def eval_step(rng, state: GenDiscState, audio_tree: AudioTree, eval_metrics, lam
 
     audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t', c=1)
 
-    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, state.sample_rate, train=False,
+    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, sample_rate, train=False,
                                       rngs={'rng_stream': rng})
     recons = output['audio']
 
     output['stft/loss'] = multiscale_stft_loss(audio_data, recons)
-    output['mel/loss'] = mel_spectrogram_loss(audio_data, recons, sample_rate=state.sample_rate)
+    output['mel/loss'] = mel_spectrogram_loss(audio_data, recons, sample_rate=sample_rate)
     output['waveform/loss'] = l1_loss(audio_data, recons)
 
     fake = state.discriminator.apply_fn({'params': state.discriminator.params}, recons)
@@ -288,7 +287,7 @@ def train_step_discriminator(state: GenDiscState, audio_data, output) -> Tuple[G
     def loss_fn(params):
         # note: you could calculate with the ``state.generator`` again, since its weights were just updated,
         # but we prefer not to in order to run faster.
-        # output = state.generator.apply_fn({'params': state.generator.params}, audio_data, state.sample_rate,
+        # output = state.generator.apply_fn({'params': state.generator.params}, audio_data, sample_rate,
         #                                   rngs=rngs, train=True  # todo: maybe pick Train=False even though DAC didn't
         #                                   )
         recons = output['audio']
@@ -311,21 +310,21 @@ def train_step_discriminator(state: GenDiscState, audio_data, output) -> Tuple[G
 
 # note that we use without_prefix=True and the same lambdas is used for eval_step
 @argbind.bind(without_prefix=True)
-def train_step_generator(rng, state: GenDiscState, audio_data, lambdas: Mapping[str, float] = None) ->\
+def train_step_generator(rng, state: GenDiscState, audio_data, sample_rate, lambdas: Mapping[str, float] = None) ->\
         Tuple[GenDiscState, dict]:
 
     assert lambdas is not None
 
     def loss_fn(params):
 
-        output = state.generator.apply_fn({'params': params}, audio_data, state.sample_rate, rngs={'rng_stream': rng})
+        output = state.generator.apply_fn({'params': params}, audio_data, sample_rate, rngs={'rng_stream': rng})
         recons = output['audio']
 
         fake = state.discriminator.apply_fn({'params': state.discriminator.params}, recons)
         real = state.discriminator.apply_fn({'params': state.discriminator.params}, audio_data)
 
         output['stft/loss'] = multiscale_stft_loss(audio_data, recons)
-        output['mel/loss'] = mel_spectrogram_loss(audio_data, recons, sample_rate=state.sample_rate)
+        output['mel/loss'] = mel_spectrogram_loss(audio_data, recons, sample_rate=sample_rate)
         output['waveform/loss'] = l1_loss(audio_data, recons)
         (
             output['adv/gen_loss'],
@@ -342,9 +341,9 @@ def train_step_generator(rng, state: GenDiscState, audio_data, lambdas: Mapping[
     return state, output
 
 
-@partial(jax.pmap, axis_name='ensemble', donate_argnums=(1, 2), static_broadcasted_argnums=(5, 6),
-         in_axes=(0, 0, 0, 0, None, None, None))
-def train_step(rng, state: GenDiscState, train_metrics, audio_tree: AudioTree, step: int,
+@partial(jax.pmap, axis_name='ensemble', donate_argnums=(1, 2), static_broadcasted_argnums=(5, 6, 7),
+         in_axes=(0, 0, 0, 0, None, None, None, None))
+def train_step(rng, state: GenDiscState, train_metrics, audio_tree: AudioTree, step: int, sample_rate,
                generator_schedule: optax.Schedule, discriminator_schedule: optax.Schedule) \
         -> Tuple[GenDiscState, TrainMetrics]:
     """Train for a single step."""
@@ -355,7 +354,7 @@ def train_step(rng, state: GenDiscState, train_metrics, audio_tree: AudioTree, s
 
     audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t', c=1)
 
-    state, output = train_step_generator(subkey2, state, audio_data)
+    state, output = train_step_generator(subkey2, state, audio_data, sample_rate)
     state, loss = train_step_discriminator(state, audio_data, output)
 
     output['adv/disc_loss'] = loss
@@ -378,14 +377,14 @@ def save_checkpoint(checkpoint_manager: ocp.CheckpointManager, state: GenDiscSta
         checkpoint_manager.wait_until_finished()
 
 
-@partial(jax.pmap, axis_name='ensemble')
-def save_samples(rng, state: GenDiscState, audio_tree: AudioTree):
+@partial(jax.pmap, axis_name='ensemble', static_broadcasted_argnums=(3,))
+def save_samples(rng, state: GenDiscState, audio_tree: AudioTree, sample_rate):
     """Save audio samples to tensorboard."""
     audio_data = audio_tree.audio_data
     batch_size = audio_data.shape[0]
     audio_data = rearrange(audio_data, 'b c t -> (b c) 1 t', c=1)
 
-    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, state.sample_rate, train=False,
+    output = state.generator.apply_fn({'params': state.generator.params}, audio_data, sample_rate, train=False,
                                       rngs={'rng_stream': rng})
     recons = output['audio']
     recons = rearrange(recons, '(b c) 1 t -> b t c', b=batch_size, c=1)
@@ -510,7 +509,7 @@ def train(
     discriminator_state = create_discriminator(subkey, shape, create_discriminator_optimizer(discriminator_schedule),
                                                tabulate)
 
-    state = GenDiscState(generator=generator_state, discriminator=discriminator_state, sample_rate=SAMPLE_RATE)
+    state = GenDiscState(generator=generator_state, discriminator=discriminator_state)
 
     state = jax_utils.replicate(state)
     train_metrics = jax_utils.replicate(TrainMetrics.empty())
@@ -559,7 +558,7 @@ def train(
 
             with report_progress.timed("train_step"):
                 key, subkey = random.split(key)
-                state, train_metrics = train_step(split_device(subkey), state, train_metrics, batch, step,
+                state, train_metrics = train_step(split_device(subkey), state, train_metrics, batch, step, SAMPLE_RATE,
                                                   generator_schedule, discriminator_schedule)
 
             for hook in hooks:
@@ -574,7 +573,7 @@ def train(
                     for _ in range(2):  # todo: argbind the 2 parameter
                         save_batch = next(sample_iter)
                         key, subkey = random.split(key)
-                        recons = save_samples(split_device(subkey), state, save_batch)
+                        recons = save_samples(split_device(subkey), state, save_batch, SAMPLE_RATE)
                         recons = jax_utils.unreplicate(recons)
                         save_batch = jax_utils.unreplicate(save_batch)
                         signal = rearrange(save_batch.audio_data, 'b c t -> b t c', c=1)
@@ -599,7 +598,7 @@ def train(
                     for test_batch in eval_iter:
                         ran_once = True
                         key, subkey = random.split(key)
-                        eval_metrics = eval_step(split_device(subkey), state, test_batch, eval_metrics)
+                        eval_metrics = eval_step(split_device(subkey), state, test_batch, eval_metrics, SAMPLE_RATE)
                     assert ran_once
 
                     summary, eval_metrics = log_eval(eval_metrics, step, writer)
