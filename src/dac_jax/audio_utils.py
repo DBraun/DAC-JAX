@@ -72,7 +72,8 @@ def compute_stft_padding(length, window_length: int, hop_length: int, match_stri
         right_pad = math.ceil(length / hop_length) * hop_length - length
         pad = (window_length - hop_length) // 2
     else:
-        right_pad = math.ceil(length/hop_length)*hop_length-length
+        right_pad = math.ceil(length/hop_length)*hop_length-length  # note: this is different from audiotools
+        # right_pad = 0
         pad = 0
 
     return right_pad, pad
@@ -91,6 +92,7 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
 
     right_pad, pad = compute_stft_padding(audio_length, frame_length, frame_step, match_stride)
     x = jnp.pad(x, pad_width=((0, 0), (0, 0), (pad, pad + right_pad)), mode=padding_type)
+
     x = rearrange(x, 'b c t -> (b c) t')
 
     if use_scipy:
@@ -99,7 +101,8 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
                                                 window=window,
                                                 nperseg=frame_length,
                                                 noverlap=(frame_length - frame_step),
-                                                padded=False,
+                                                padded=match_stride,
+                                                boundary='even' if match_stride else 'zeros',
                                                 )
         stft_data = rearrange(stft_data, '(b c) nf nt -> b c nf nt', b=batch_size)
         stft_data = stft_data * (frame_length / 2)  # note that we undo this in istft.
@@ -144,6 +147,7 @@ def istft(stft_matrix: chex.Array,
     _, reconstructed_signal = jax.scipy.signal.istft(stft_matrix,
                                                      noverlap=noverlap,
                                                      window=window,
+                                                     boundary=True,
                                                      )
 
     reconstructed_signal = reconstructed_signal / (frame_length / 2)  # undoing something done in the STFT.

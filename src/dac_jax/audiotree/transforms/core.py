@@ -224,7 +224,7 @@ def _corrupt_phase(
     B, C, length = audio_data.shape
 
     stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, match_stride=False,
-                       padding_type='reflect')
+                       padding_type='reflect', use_scipy=True)
     istft_fun = partial(istft, window=window, length=length)
 
     stft_data = stft_fun(audio_data)
@@ -255,8 +255,8 @@ def _shift_phase(
     frame_step = int(frame_length * hop_factor)
     noverlap = frame_length - frame_step
 
-    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, padding_type='reflect',
-                       use_scipy=True)
+    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, match_stride=False,
+                       padding_type='reflect', use_scipy=True)
     istft_fun = partial(istft, frame_length=frame_length, noverlap=noverlap, window=window, length=length)
 
     stft_data = stft_fun(audio_data)
