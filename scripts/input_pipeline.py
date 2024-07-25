@@ -32,13 +32,14 @@ def build_transforms(
     :return: a list of instances of the Transforms.
     """
     def to_transform_instances(transform_classes):
-        if transform_classes is None:
-            return None
         instances = []
         for TransformClass in transform_classes:
             instance = getattr(transforms_lib, TransformClass)()
             instances.append(instance)
         return instances
+
+    if augment is None:
+        augment = []
 
     return to_transform_instances(augment)
 
@@ -71,10 +72,6 @@ def create_dataset(
 
     assert sources is not None
 
-    saliency_params = SaliencyParams()  # rely on argbind
-
-    transforms = build_transforms()  # rely on argbind
-
     if train:
         assert num_steps is not None and num_steps > 0
         datasource = AudioDataBalancedSource(
@@ -84,7 +81,7 @@ def create_dataset(
             mono=mono,
             duration=duration,
             extensions=extensions,
-            saliency_params=saliency_params,
+            saliency_params=SaliencyParams(),  # rely on argbind,
         )
     else:
         datasource = AudioDataSimpleSource(
@@ -109,10 +106,8 @@ def create_dataset(
     pygrain_ops = [
         grain.Batch(batch_size=batch_size, drop_remainder=True),
         ReduceBatchTransform(),
+        *build_transforms(),  # rely on argbind
     ]
-
-    if transforms is not None:
-        pygrain_ops += transforms
 
     batched_dataloader = grain.DataLoader(
         data_source=datasource,
