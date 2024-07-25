@@ -217,6 +217,10 @@ class ResidualVectorQuantize(nn.Module):
         codes = jnp.stack(codebook_indices, axis=2)
         latents = jnp.concatenate(latents, axis=2)
 
+        # normalize based on number of codebooks
+        commitment_loss = commitment_loss / self.n_codebooks
+        codebook_loss = codebook_loss / self.n_codebooks
+
         return z_q, codes, latents, commitment_loss, codebook_loss
 
     def from_codes(self, codes: jnp.ndarray):

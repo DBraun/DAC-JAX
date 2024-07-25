@@ -50,8 +50,8 @@ lambdas:
                       # because of the number of fft sizes is 3.
   adv/gen_loss: 8  # 1.0 * 8 where 8 is number of Discriminator rates+periods+fft sizes = (0+5+3)
                    # 1.0 comes from the PyTorch DAC base.yml
-  vq/commitment_loss: 0.25
-  vq/codebook_loss: 1.0
+  vq/commitment_loss: 2.25  # 0.25 * 9 since we normalize based on the number of codebooks.
+  vq/codebook_loss: 9  # 1 * 9 since we normalized based on the number of codebooks.
 
 train.batch_size: 72
 train.val_batch_size: 100
