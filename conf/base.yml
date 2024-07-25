@@ -41,12 +41,15 @@ create_discriminator_optimizer.grad_clip: 10
 
 lambdas:
   mel/loss: 15.0
-  adv/feat_loss: .02  # 2.0 / (5+5+5+5+5+25+25+25) = 2.0 / 100
-                      # note that 5 is (6-1) where 6 is number of convs in MPD. Then there are 5 of these because the
+  adv/feat_loss: 200  # 2.0 * (5+5+5+5+5+25+25+25) = 2.0 * 100
+                      # 2.0 comes from the PyTorch DAC base.yml Then we multiply since we normalized the magnitude
+                      # of our feature loss differently than the PyTorch version.
+                      # 5 is (6-1) where 6 is number of convs in MPD. Then there are 5 of these because the
                       # number of periods is 5.
                       # 25 is number of bands (5) times the number of convs (5) in MRD. Then there are 3 of these
                       # because of the number of fft sizes is 3.
-  adv/gen_loss: 0.125  # 1.0 / 8 where 8 is number of Discriminator rates+periods+fft sizes = (0+5+3)
+  adv/gen_loss: 8  # 1.0 * 8 where 8 is number of Discriminator rates+periods+fft sizes = (0+5+3)
+                   # 1.0 comes from the PyTorch DAC base.yml
   vq/commitment_loss: 0.25
   vq/codebook_loss: 1.0
 
