@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional
 
 from flax import linen as nn
 
@@ -22,7 +22,7 @@ merge_param = module.merge_param
 map_variables = transforms.map_variables
 
 
-class MyWeightNorm(nn.Module):
+class WeightNorm(nn.Module):
 
   layer_instance: nn.Module
   epsilon: float = 1e-12

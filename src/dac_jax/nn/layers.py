@@ -12,7 +12,7 @@ from flax.typing import (
 import jax
 import jax.numpy as jnp
 
-from .weight_norm import MyWeightNorm
+from .weight_norm import WeightNorm as MyWeightNorm
 
 
 def default_stride(strides):
