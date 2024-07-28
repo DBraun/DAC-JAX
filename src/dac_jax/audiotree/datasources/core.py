@@ -42,7 +42,8 @@ def _find_files_with_extensions(directory: str, extensions: List[str], max_depth
             return
         with os.scandir(current_dir) as it:
             for entry in it:
-                if entry.is_file(follow_symlinks=follow_symlinks) and any(entry.name.lower().endswith(ext) for ext in extensions_set):
+                if entry.is_file(follow_symlinks=follow_symlinks) and any(entry.name.lower().endswith(ext)
+                                                                          for ext in extensions_set):
                     matching_files.append(entry.path)
                 elif entry.is_dir(follow_symlinks=follow_symlinks):
                     recurse(entry.path, current_depth + 1)

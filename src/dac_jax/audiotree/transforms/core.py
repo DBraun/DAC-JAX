@@ -57,7 +57,8 @@ def istft(stft_matrix: chex.Array,
         if length > reconstructed_signal.shape[-1]:
             # Pad the signal if it is shorter than the desired length
             pad_width = length - reconstructed_signal.shape[-1]
-            reconstructed_signal = jnp.pad(reconstructed_signal, ((0, 0), (0, 0), (0, pad_width)), mode='constant')
+            reconstructed_signal = jnp.pad(reconstructed_signal, ((0, 0), (0, 0), (0, pad_width)),
+                                           mode='constant')
         else:
             # Trim the signal if it is longer than the desired length
             reconstructed_signal = reconstructed_signal[..., :length]
@@ -365,7 +366,8 @@ class ShiftPhase(grain.RandomMapTransform):
 class Choose(grain.RandomMapTransform):
 
     """
-    With probability ``prob``, choose a ``c`` transform(s) among ``transforms`` with optional probability weights ``weights``
+    With probability ``prob``, choose a ``c`` transform(s) among ``transforms`` with optional probability weights
+    ``weights``
     """
 
     def __init__(self, *transforms, c: int = 1, weights=None, prob: float = 1):
@@ -385,7 +387,8 @@ class Choose(grain.RandomMapTransform):
     def random_map(self, element, rng: np.random.Generator):
 
         # Reference:
-        # https://github.com/google/grain/blob/2a45a382a378a3737f0df76ba2c6ac7cc2dc43b6/grain/_src/python/lazy_dataset/transformations/map.py#L95-L112
+        # https://github.com/google/grain/blob/2a45a382a378a3737f0df76ba2c6ac7cc2dc43b6/grain/_src/python/lazy_dataset/
+        # transformations/map.py#L95-L112
 
         if rng.random() >= self.prob:
             return element
