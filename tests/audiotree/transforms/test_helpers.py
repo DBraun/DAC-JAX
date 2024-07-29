@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import jax.random as random
 import pytest
 
-from dac_jax.audiotree.transforms.core import istft, stft
+from dac_jax.audiotree.transforms.helpers import stft, istft
 
 
 @pytest.mark.parametrize("hop_factor,length", product(
