@@ -44,8 +44,8 @@ import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
+from audiotree import AudioTree
 from dac_jax import load_model
-from dac_jax.audiotree import AudioTree
 from dac_jax.model import DAC, Discriminator
 from dac_jax.nn.loss import l1_loss, multiscale_stft_loss, mel_spectrogram_loss, generator_loss, discriminator_loss
 

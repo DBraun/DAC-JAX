@@ -6,9 +6,9 @@ from flax import jax_utils
 import grain.python as grain
 import jax
 
-from dac_jax.audiotree import transforms as transforms_lib
-from dac_jax.audiotree.datasources import SaliencyParams, AudioDataSimpleSource, AudioDataBalancedSource
-from dac_jax.audiotree.transforms import ReduceBatchTransform
+from audiotree import transforms as transforms_lib
+from audiotree.datasources import SaliencyParams, AudioDataSimpleSource, AudioDataBalancedSource
+from audiotree.transforms import ReduceBatchTransform
 
 
 # Transforms

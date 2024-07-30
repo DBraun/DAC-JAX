@@ -80,8 +80,9 @@ mel_spectrogram_loss.clamp_eps: 1.0e-5
 mel_spectrogram_loss.mag_weight: 0.0
 
 # Data Augmentation
-VolumeNorm.min_db: -16
-VolumeNorm.max_db: -16
+VolumeNorm.config:
+  min_db: -16
+  max_db: -16
 
 train/build_transforms.augment:
   - VolumeNorm
