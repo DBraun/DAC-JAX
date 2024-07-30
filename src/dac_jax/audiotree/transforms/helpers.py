@@ -76,7 +76,7 @@ class BaseTransformMixIn:
         raise NotImplementedError("Must be implemented in subclass")
 
     @staticmethod
-    def _apply_transform(element: jnp.ndarray, rng: random.PRNGKey, **kwargs):
+    def _apply_transform(element, rng: random.PRNGKey, **kwargs):
         """
         Apply the transformation to the given element.
 
@@ -91,10 +91,10 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
 
     def __init__(
             self,
-            config: Dict[str, Dict[str, Any]] = None,
+            config: Dict[str, Any] = None,
             split_seed: bool = True,
             prob: float = 1.0,
-            scope: Dict[str, Dict[str, Any]] = None,
+            scope: Dict[str, Any] = None,
             output_key: str = None,
             ):
         """
@@ -283,7 +283,7 @@ def _volume_norm_transform(audio_tree: AudioTree, key: jnp.ndarray, min_db: floa
     return audio_tree
 
 
-# @partial(jax.jit, donate_argnums=0)  # todo:
+@partial(jax.jit, donate_argnums=0)
 def _volume_change_transform(audio_tree: AudioTree, key: jnp.ndarray, min_db: float, max_db: float) -> (
         tuple)[AudioTree, jnp.ndarray]:
 
@@ -356,6 +356,7 @@ def _corrupt_phase(
     return audio_tree.replace(audio_data=audio_data)
 
 
+# todo: potential slow-down with re-jitting due to changed static args
 @partial(jax.jit, donate_argnums=0, static_argnums=(2, 3, 4, 5))
 def _shift_phase(
         audio_tree: AudioTree,
