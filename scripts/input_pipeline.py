@@ -105,7 +105,7 @@ def create_dataset(
 
     pygrain_ops = [
         grain.Batch(batch_size=batch_size, drop_remainder=True),
-        ReduceBatchTransform(),
+        ReduceBatchTransform(sample_rate=sample_rate),
         *build_transforms(),  # rely on argbind
     ]
 
