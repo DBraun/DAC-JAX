@@ -13,8 +13,7 @@ from audiotree.transforms import ReduceBatchTransform
 
 # Transforms
 def filter_fn(fn):
-    return (fn.__qualname__ != 'TfRandomMapTransform' and
-            (hasattr(fn, 'random_map') or hasattr(fn, 'map') or hasattr(fn, 'np_random_map')))
+    return hasattr(fn, 'random_map') or hasattr(fn, 'map') or hasattr(fn, 'np_random_map')
 
 
 # https://github.com/pseeth/argbind/tree/main/examples/bind_module

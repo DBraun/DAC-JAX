@@ -1,23 +1,21 @@
-import math
-import timeit
-from typing import List, Union, Tuple, Optional
 from dataclasses import field, dataclass
 from functools import lru_cache
+import math
 from pathlib import Path
+import timeit
+from typing import List, Union, Tuple
 
-import numpy as np
-
-import jax.numpy as jnp
-import jax.random
-import flax.linen as nn
-
+from audiotree.resample import resample
 from einops import rearrange
-
+from flax import linen as nn
+import jax
+from jax import numpy as jnp
+from jax import random
+import numpy as np
 import tqdm
 
 from dac_jax.nn.layers import Snake1d, WNConv1d, WNConvTranspose1d
 from dac_jax.nn.quantize import ResidualVectorQuantize
-from dac_jax.resample import resample
 from dac_jax.audio_utils import volume_norm
 
 SUPPORTED_VERSIONS = ["1.0.0"]
@@ -713,17 +711,17 @@ def receptive_field_test():
     model = DAC(sample_rate=SAMPLE_RATE)
 
     length = SAMPLE_RATE * 2 * 2
-    key = jax.random.key(0)
-    key, subkey = jax.random.split(key)
-    x = jax.random.uniform(subkey, shape=(1, 1, length), minval=-1, maxval=1)
-    key, subkey = jax.random.split(key)
-    variables = model.init({'params': subkey, 'rng_stream': jax.random.key(4)}, x, SAMPLE_RATE)
+    key = random.key(0)
+    key, subkey = random.split(key)
+    x = random.uniform(subkey, shape=(1, 1, length), minval=-1, maxval=1)
+    key, subkey = random.split(key)
+    variables = model.init({'params': subkey, 'rng_stream': random.key(4)}, x, SAMPLE_RATE)
     params = variables['params']
 
     def fun(x):
 
         # Make a forward pass
-        out = model.apply({'params': params}, x, rngs={'rng_stream': jax.random.key(0)})["audio"]
+        out = model.apply({'params': params}, x, rngs={'rng_stream': random.key(0)})["audio"]
         print("Input shape:", x.shape)
         print("Output shape:", out.shape)
 
@@ -731,7 +729,7 @@ def receptive_field_test():
         out = out.sum()
         return out
 
-    # print(model.tabulate({'params': jax.random.key(0), 'rng_stream': jax.random.key(1)}, x, SAMPLE_RATE,
+    # print(model.tabulate({'params': random.key(0), 'rng_stream': random.key(1)}, x, SAMPLE_RATE,
     #                      compute_flops=True,
     #                      compute_vjp_flops=True
     #                      ))

@@ -1,11 +1,11 @@
 from dataclasses import field
 
+from audiotree.resample import resample
 from einops import rearrange
 import flax.linen as nn
 import jax.numpy as jnp
 import jax.scipy.signal
 
-from dac_jax.resample import resample
 from dac_jax.audio_utils import stft
 from dac_jax.nn.layers import LeakyReLU
 

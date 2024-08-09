@@ -473,7 +473,7 @@ def pesq(
         PESQ score: P.862.2 Prediction (MOS-LQO)
     """
     from pesq import pesq as pesq_fn
-    from ..resample import resample
+    from audiotree.resample import resample
 
     if estimates.ndim == 3:
         estimates = jnp.average(estimates, axis=-2, keepdims=True)  # to mono
@@ -521,7 +521,7 @@ def visqol(
     from visqol import visqol_lib_py
     from visqol.pb2 import visqol_config_pb2
     from visqol.pb2 import similarity_result_pb2
-    from ..resample import resample
+    from audiotree.resample import resample
 
     config = visqol_config_pb2.VisqolConfig()
     if mode == "audio":
