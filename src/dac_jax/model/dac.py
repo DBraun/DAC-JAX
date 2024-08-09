@@ -67,7 +67,7 @@ class ResidualUnit(nn.Module):
 
     dim: int = 16
     dilation: int = 1
-    padding: Optional[bool] = field(default=True)
+    padding: int = 1
 
     @staticmethod
     def delay(d, L):
@@ -103,7 +103,7 @@ class EncoderBlock(nn.Module):
 
     dim: int = 16
     stride: int = 1
-    padding: bool = field(default=True)
+    padding: int = 1
 
     @staticmethod
     def delay(s, L):
@@ -145,7 +145,7 @@ class Encoder(nn.Module):
     d_model: int = 64
     strides: list = field(default_factory=lambda: [2, 4, 8, 8])
     d_latent: int = 64
-    padding: Optional[bool] = field(default=True)
+    padding: int = 1
 
     @staticmethod
     def delay(strides, L):
@@ -194,7 +194,7 @@ class DecoderBlock(nn.Module):
     input_dim: int = 16
     output_dim: int = 8
     stride: int = 1
-    padding: Optional[bool] = field(default=True)
+    padding: int = 1
 
     @staticmethod
     def delay(s, L):
@@ -238,7 +238,7 @@ class Decoder(nn.Module):
     channels: int
     rates: List[int]
     d_out: int = 1
-    padding: Optional[bool] = field(default=True)
+    padding: int = 1
 
     def __post_init__(self) -> None:
         assert self.rates is not None and len(self.rates)
@@ -349,9 +349,8 @@ class DAC(nn.Module):
         return L
 
     def preprocess(self, audio_data, sample_rate):
-        if sample_rate is None:
-            sample_rate = self.sample_rate
-        assert sample_rate == self.sample_rate
+        if sample_rate:
+            assert sample_rate == self.sample_rate, f'Expected sample rate is {self.sample_rate}'
 
         length = audio_data.shape[-1]
         right_pad = math.ceil(length / self.hop_length) * self.hop_length - length
@@ -404,7 +403,7 @@ class DAC(nn.Module):
         self,
         audio_data: jnp.ndarray,
         n_quantizers: int = None
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    ) -> jnp.ndarray:
         """Encode given audio data and return quantized latent codes
 
         Parameters
@@ -531,6 +530,28 @@ class DAC(nn.Module):
             "vq/codebook_loss": codebook_loss,
         }
 
+    @staticmethod
+    def ensure_max_of_audio(audio_data: jnp.ndarray, max: float = 1.0):
+        """Ensures that ``abs(audio_data) <= max``.
+
+        Parameters
+        ----------
+        audio_data : jnp.ndarray
+            Audio data shaped [B, C, T]
+        max : float, optional
+            Max absolute value of signal, by default 1.0
+
+        Returns
+        -------
+        audio_data
+            audio data with values scaled between -max and max.
+        """
+        peak = jnp.abs(audio_data).max(axis=-1, keepdims=True)
+        peak_gain = jnp.ones_like(peak)
+        peak_gain = jnp.where(peak > max, max/peak, peak_gain)
+        audio_data = audio_data * peak_gain
+        return audio_data
+
     def compress(self, compress_chunk, audio_path_or_signal: Union[str, Path, jnp.ndarray], original_sr: int,
                  win_duration: float = 1, normalize_db: float = -16, n_quantizers: int = None, verbose=False,
                  benchmark=False) -> DACFile:
@@ -552,6 +573,8 @@ class DAC(nn.Module):
 
         audio_signal = rearrange(audio_signal, 'b c t -> (b c) 1 t')
 
+        input_db = None
+
         # Use ffmpeg is audio duration is longer than 10 minutes
         # Here we compare the number of samples to 10 minutes * (60 sec/minute) * (original_sr samples/sec)
         use_ffmpeg = audio_signal.shape[-1] >= 10 * 60 * original_sr
@@ -564,36 +587,10 @@ class DAC(nn.Module):
         else:
             audio_signal = resample(audio_signal, original_sr, self.sample_rate)
 
-            # todo: make faster?
-            normalized_audio, input_db = volume_norm(audio_signal,
-                                                     normalize_db if normalize_db is not None else -16,
-                                                     self.sample_rate)
-
             if normalize_db is not None:
-                audio_signal = normalized_audio
+                audio_signal, input_db = volume_norm(audio_signal, normalize_db, self.sample_rate)
 
-        def ensure_max_of_audio(audio_data: jnp.ndarray, max: float = 1.0):
-            """Ensures that ``abs(audio_data) <= max``.
-
-            Parameters
-            ----------
-            audio_data : jnp.ndarray
-                Audio data shaped [B, C, T]
-            max : float, optional
-                Max absolute value of signal, by default 1.0
-
-            Returns
-            -------
-            audio_data
-                audio data with values scaled between -max and max.
-            """
-            peak = jnp.abs(audio_data).max(axis=-1, keepdims=True)
-            peak_gain = jnp.ones_like(peak)
-            peak_gain = jnp.where(peak > max, max/peak, peak_gain)
-            audio_data = audio_data * peak_gain
-            return audio_data
-
-        audio_signal = ensure_max_of_audio(audio_signal)
+        audio_signal = self.ensure_max_of_audio(audio_signal)
 
         # Chunked inference
         # Zero-pad signal on either side by the delay
@@ -696,7 +693,6 @@ class DAC(nn.Module):
             raise RuntimeError('Not implemented yet')
         else:
             # Normalize to original loudness
-            # todo: make faster?
             if obj.input_db is not None:
                 recons, _ = volume_norm(recons, obj.input_db, self.sample_rate)
 

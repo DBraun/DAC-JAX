@@ -1,13 +1,12 @@
 import os
 from os import environ
-from os import makedirs
 from pathlib import Path
 import json
 import torch
 import numpy as np
 import argbind
 
-from dac_jax.load_torch_weights import torch_to_linen
+from dac_jax.utils.load_torch_weights import torch_to_linen
 from dac_jax.model import DAC
 
 __MODEL_LATEST_TAGS__ = {

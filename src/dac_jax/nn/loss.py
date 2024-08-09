@@ -1,17 +1,13 @@
-from typing import Callable, Optional
 from functools import partial
 import os
-
-import numpy as np
-
-import jax
-import jax.numpy as jnp
+from typing import Callable, Optional
 
 from einops import rearrange
+import jax
+import jax.numpy as jnp
+import numpy as np
 
-import dm_aux as aux
-
-from dac_jax.audio_utils import stft, decibel_loudness
+from dac_jax.audio_utils import stft, decibel_loudness, mel_spectrogram
 
 
 def l1_loss(y_true: jnp.ndarray,
@@ -118,6 +114,8 @@ def discriminator_loss(fake, real):
     for x_fake, x_real in zip(d_fake, d_real):
         loss_d = loss_d + jnp.square(x_fake[-1]).mean()
         loss_d = loss_d + jnp.square(1 - x_real[-1]).mean()
+    # We normalize based on the number of feature maps, but the original DAC doesn't do this.
+    loss_d = loss_d / len(d_fake)
     return loss_d
 
 
@@ -132,11 +130,18 @@ def generator_loss(fake, real):
     for x_fake in d_fake:
         loss_g = loss_g + jnp.square(1 - x_fake[-1]).mean()
 
+    # We normalize based on the number of feature maps, but the original DAC doesn't do this.
+    loss_g = loss_g / len(d_fake)
+
     loss_feature = 0
 
     for i in range(len(d_fake)):
-        for j in range(len(d_fake[i]) - 1):
+        for j in range(len(d_fake[i])-1):
             loss_feature = loss_feature + l1_loss(d_fake[i][j], d_real[i][j])
+
+    # We normalize based on the number of feature maps, but the original DAC doesn't do this.
+    loss_feature = loss_feature / sum([len(d_fake[i])-1 for i in range(len(d_fake))])
+
     return loss_g, loss_feature
 
 
@@ -307,12 +312,13 @@ def mel_spectrogram_loss(y_true: jnp.ndarray,
             spectrogram = jnp.abs(stft_data)
             return spectrogram
 
-        mel_fun = partial(aux.spectral.mel_spectrogram, log_scale=False, sample_rate=sample_rate,
-                          frame_length=frame_length, num_features=features, lower_edge_hertz=fmin,
-                          upper_edge_hertz=fmax)
-
         x_spectrogram = spectrogram_fn(x)
         y_spectrogram = spectrogram_fn(y)
+
+        nf = x_spectrogram.shape[-1]
+
+        mel_fun = partial(mel_spectrogram, log_scale=False, sample_rate=sample_rate, frame_length=2 * (nf - 1),
+                          num_features=features, lower_edge_hertz=fmin, upper_edge_hertz=fmax)
 
         x_mels = mel_fun(x_spectrogram)
         y_mels = mel_fun(y_spectrogram)

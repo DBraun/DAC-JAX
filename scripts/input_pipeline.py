@@ -1,207 +1,173 @@
-import random
-import os
-from typing import List
-from pathlib import Path
-import hashlib
+import argbind
 
-from absl import logging
+from typing import List, Mapping
 
-import tensorflow as tf
-
+from flax import jax_utils
+import grain.python as grain
 import jax
-import jax.numpy as jnp
-import soundfile
-import librosa
+
+from audiotree import transforms as transforms_lib
+from audiotree.datasources import SaliencyParams, AudioDataSimpleSource, AudioDataBalancedSource
+from audiotree.transforms import ReduceBatchTransform
 
 
-def find_files_with_extensions(directory: str, extensions: List[str], max_depth=None, follow_symlinks=False):
+# Transforms
+def filter_fn(fn):
+    return (fn.__qualname__ != 'TfRandomMapTransform' and
+            (hasattr(fn, 'random_map') or hasattr(fn, 'map') or hasattr(fn, 'np_random_map')))
+
+
+# https://github.com/pseeth/argbind/tree/main/examples/bind_module
+transforms_lib = argbind.bind_module(transforms_lib, 'train', 'val', filter_fn=filter_fn)
+
+SaliencyParams = argbind.bind(SaliencyParams, 'train', 'val', 'test', 'sample')
+
+
+@argbind.bind('train', 'val', 'test', 'sample')
+def build_transforms(
+        augment: list[str] = None,
+):
     """
-    Searches for files with specified extensions up to a maximum depth in the directory,
-    without modifying dirs while iterating.
-
-    Parameters:
-    - directory (str): The path to the directory to search.
-    - extensions (list): A list of file extensions to search for. Each extension should include a period.
-    - max_depth (int): The maximum depth to search for files.
-    - follow_symlinks (bool): Whether to follow symbolic links during the search.
-
-    Returns:
-    - list: A list of paths to files that match the extensions within the maximum depth.
+    :param augment: A list of str names of Transforms (from ``audiotree.transforms``) such as VolumeNorm
+    :return: a list of instances of the Transforms.
     """
-    matching_files = []
-    extensions_set = {ext.lower() for ext in extensions}  # Normalize extensions to lowercase for matching
-    directory = os.path.abspath(directory)  # Ensure the directory path is absolute
+    def to_transform_instances(transform_classes):
+        instances = []
+        for TransformClass in transform_classes:
+            instance = getattr(transforms_lib, TransformClass)()
+            instances.append(instance)
+        return instances
 
-    def recurse(current_dir, current_depth):
-        if max_depth is not None and current_depth > max_depth:
-            return
-        with os.scandir(current_dir) as it:
-            for entry in it:
-                if entry.is_file(follow_symlinks=follow_symlinks) and any(entry.name.lower().endswith(ext) for ext in extensions_set):
-                    matching_files.append(entry.path)
-                elif entry.is_dir(follow_symlinks=follow_symlinks):
-                    recurse(entry.path, current_depth + 1)
+    if augment is None:
+        augment = []
 
-    recurse(directory, 0)
-    return matching_files
+    return to_transform_instances(augment)
 
 
-class AudioDataset(tf.data.Dataset):
+def prepare_for_prefetch(xs):
+    local_device_count = jax.local_device_count()
 
-    @staticmethod
-    def _generator(folders, duration: float, shuffle: bool, sample_rate: int, channels: int,
-                   random_offset=False, repeat=False):
+    def _prepare(x):
+        return x.reshape((local_device_count, -1) + x.shape[1:])
 
-        # Caution: While this is a convenient approach it has limited portability and scalability.
-        # It must run in the same python process that created the generator, and is still subject to the Python GIL.
-
-        extensions = ['.wav', '.flac', '.mp3', '.mp4', '.ogg']
-
-        file_paths = []
-        for folder in folders:
-            file_paths += find_files_with_extensions(folder.decode('utf-8'), extensions=extensions)
-
-        key = jax.random.key(0)  # todo:
-        loudness_cutoff = -40  # todo:
-
-        while True:
-
-            if shuffle:
-                random.shuffle(file_paths)
-
-            for file_path in file_paths:
-                if random_offset:  # todo: maybe just use AudioTools here
-                    info = soundfile.info(file_path)
-                    total_duration = info.duration  # seconds
-
-                    lower_bound = 0
-                    upper_bound = max(total_duration - duration, 0)
-
-                    audio_data = jnp.zeros(shape=(channels, round(duration*sample_rate)))
-                    best_loudness = -jnp.inf
-                    attempts = 0
-                    max_attempts = 100
-                    while (best_loudness < loudness_cutoff) and attempts < max_attempts:
-                        attempts += 1
-
-                        key, subkey = jax.random.split(key)
-                        offset = jax.random.uniform(subkey, shape=(1,), minval=lower_bound, maxval=upper_bound).item()
-                        candidate_audio_data, _ = librosa.load(
-                            file_path,
-                            offset=offset,
-                            duration=duration,
-                            sr=sample_rate,
-                            mono=False,
-                        )
-
-                        # Calculate the peak amplitude based on the raw audio file
-                        peak_amplitude = jnp.max(jnp.abs(candidate_audio_data))
-
-                        # Convert peak amplitude to dBFS
-                        dBFS = 20 * jnp.log10(peak_amplitude)
-
-                        if dBFS > best_loudness:
-                            best_loudness = dBFS
-                            audio_data = candidate_audio_data
-
-                        if attempts == max_attempts:
-                            logging.warning(f'Struggled to find salient audio section for file: {file_path}')
-                            continue
-                else:
-                    audio_data, _ = librosa.load(file_path, sr=sample_rate, mono=False, duration=duration)
-
-                if audio_data.ndim < 2:
-                    audio_data = jnp.expand_dims(audio_data, axis=0)
-
-                if audio_data.shape[-1] < round(duration*sample_rate):
-                    pad_right = round(duration*sample_rate) - audio_data.shape[-1]
-                    audio_data = jnp.pad(audio_data, ((0, 0), (0, int(pad_right))))
-
-                assert audio_data.ndim == 2
-
-                yield {'audio_data': audio_data}
-
-            if not repeat:
-                break
-
-    def __new__(cls, sources: dict, duration: float, batch_size=4, dtype=tf.float32, repeat=False, shuffle=False,
-                channels=1, sample_rate=44100, random_offset=False):
-
-        assert sources is not None, \
-            "You must specify a sources as a dictionary mapping labels to lists of directories."
-
-        dur_samples = round(duration * sample_rate)
-
-        output_signature = tf.TensorSpec(shape=(channels, dur_samples), dtype=dtype)
-
-        datasets = []
-        for label, folders in sources.items():
-            dataset = tf.data.Dataset.from_generator(
-                cls._generator,
-                output_signature={'audio_data': output_signature},
-                args=(folders, duration, shuffle, sample_rate, channels, random_offset, repeat)
-            )
-            datasets.append(dataset)
-
-        weights = None  # uniform distribution
-        dataset = tf.data.Dataset.sample_from_datasets(datasets, weights=weights, rerandomize_each_iteration=shuffle)
-        del datasets
-
-        def convert_dtype(example):
-            example = example.to(dtype)
-            return example
-
-        # dataset = dataset.map(convert_dtype)  # todo:
-        # dataset = dataset.map(convert_dtype, num_parallel_calls=tf.data.experimental.AUTOTUNE)  # todo:
-
-        dataset = dataset.batch(batch_size, drop_remainder=True)
-
-        # hashed = hashlib.sha1(';'.join(sources).encode()).hexdigest()
-        # cache_dir = str(Path("dataset_cache") / hashed)
-        # os.makedirs(cache_dir, exist_ok=True)
-        # cache_path = os.path.join(cache_dir, "cache")
-        # dataset = dataset.cache(cache_path)  # todo:
-
-        dataset = dataset.prefetch(tf.data.AUTOTUNE)
-
-        return dataset
+    return jax.tree_util.tree_map(_prepare, xs)
 
 
-def test_simple(folder):
+@argbind.bind('train', 'val', 'test', 'sample')
+def create_dataset(
+        batch_size: int,
+        sample_rate: int,
+        duration: float = 0.2,
+        sources: Mapping[str, List[str]] = None,
+        extensions: List[str] = None,
+        mono: int = 1,  # bool
+        train: int = 0,  # bool
+        num_steps: int = None,
+        seed: int = 0,
+        worker_count: int = 0,  # todo: https://github.com/google/grain/issues/495
+        prefetch_size: int = 1,
+        enable_profiling=False,
+        num_epochs: int = 1,  # for train/val use 1, but for sample set it to None so that it loops forever.
+) -> grain.DataLoader:
 
-    duration = 4  # seconds
+    assert sources is not None
 
-    sources = {
-        'foo': [folder, folder, folder]
-    }
+    if train:
+        assert num_steps is not None and num_steps > 0
+        datasource = AudioDataBalancedSource(
+            sources=sources,
+            num_steps=num_steps * batch_size,
+            sample_rate=sample_rate,
+            mono=mono,
+            duration=duration,
+            extensions=extensions,
+            saliency_params=SaliencyParams(),  # rely on argbind,
+        )
+    else:
+        datasource = AudioDataSimpleSource(
+            sources=sources,
+            num_steps=num_steps * batch_size if num_steps is not None else None,
+            sample_rate=sample_rate,
+            mono=mono,
+            duration=duration,
+            extensions=extensions,
+        )
 
-    dataset = AudioDataset(sources=sources, duration=duration, batch_size=4)
+    index_sampler = grain.IndexSampler(
+        num_records=len(datasource),
+        num_epochs=num_epochs,
+        shard_options=grain.NoSharding(),
+        shuffle=not train,  # Keep shuffling off for training, which uses AudioDataBalancedSource.
+                            # AudioDataBalancedSource already does the shuffling deterministically, and turning it on
+                            # here would actually BREAK the locality of the balancing between batches.
+        seed=seed,
+    )
 
-    i = 0
-    for item in dataset:
-        i += 1
-        if i > 10:
-            break
+    pygrain_ops = [
+        grain.Batch(batch_size=batch_size, drop_remainder=True),
+        ReduceBatchTransform(sample_rate=sample_rate),
+        *build_transforms(),  # rely on argbind
+    ]
+
+    batched_dataloader = grain.DataLoader(
+        data_source=datasource,
+        sampler=index_sampler,
+        operations=pygrain_ops,
+        worker_count=worker_count,
+        worker_buffer_size=1,  # set to 1 because we use jax_utils.prefetch_to_device for similar behavior.
+        enable_profiling=enable_profiling,
+    )
+
+    # similar to flax.jax_utils.replicate
+    batched_dataloader = map(prepare_for_prefetch, batched_dataloader)
+
+    if prefetch_size > 1:
+        # For prefetch to work, we must have already used prepare_for_prefetch
+        batched_dataloader = jax_utils.prefetch_to_device(batched_dataloader, size=prefetch_size)
+
+    batched_dataloader = iter(batched_dataloader)
+
+    return batched_dataloader
 
 
 if __name__ == '__main__':
 
-    import argparse
+    from tqdm import tqdm
+    from dac_jax.audiotree.transforms import VolumeNorm, RescaleAudio, SwapStereo, InvertPhase
+    from absl import logging
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--folder', type=str, required=True)
+    logging.set_verbosity(logging.INFO)
 
-    args = parser.parse_args()
+    folder1 = '/mnt/c/users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Bass-Bass3-bass-10-syx-01-SUPERBASS2-note69'
+    folder2 = '/mnt/c/Users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Accordion-ACCORD01-SYX-06-AKKORDEON-note69'
 
-    tf.config.experimental.set_visible_devices([], 'GPU')
+    sources = {
+        'a': [folder1],
+        'b': [folder2],
+    }
 
-    import sys
-    import traceback
-    import pdb
+    num_steps = 1000
 
-    try:
-        test_simple(args.folder)
-    except:
-        extype, value, tb = sys.exc_info()
-        traceback.print_exc()
-        pdb.post_mortem()
+    ds = create_dataset(
+        sources=sources,
+        duration=0.5,
+        train=True,
+        batch_size=32,
+        sample_rate=44100,
+        mono=True,
+        seed=0,
+        num_steps=num_steps,
+        extensions=None,
+        worker_count=0,
+        worker_buffer_size=1,
+        transforms=[
+            VolumeNorm(),
+            RescaleAudio(),
+            SwapStereo(),
+            InvertPhase(),
+        ],
+        saliency_params=SaliencyParams(False, 8, -70),
+    )
+
+    for x in tqdm(ds, total=num_steps, desc='Grain Dataset'):
+        pass

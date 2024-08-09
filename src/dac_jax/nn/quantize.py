@@ -1,15 +1,10 @@
 from typing import Union, Tuple
 
+from einops import rearrange
+import flax.linen as nn
 import jax
-jax.config.update('jax_threefry_partitionable', True)
 import jax.numpy as jnp
 import jax.random
-assert jax.config.jax_threefry_partitionable == True
-assert jax.config.jax_default_prng_impl == 'threefry2x32'
-
-import flax.linen as nn
-
-from einops import rearrange
 
 from dac_jax.nn.layers import WNConv1d
 
@@ -65,7 +60,9 @@ class VectorQuantize(nn.Module):
     def setup(self):
         self.in_proj = WNConv1d(features=self.codebook_dim, kernel_size=(1,))
         self.out_proj = WNConv1d(features=self.input_dim, kernel_size=(1,))
-        self.codebook = nn.Embed(num_embeddings=self.codebook_size, features=self.codebook_dim)
+        # PyTorch uses a normal distribution for weight initialization of Embeddings.
+        self.codebook = nn.Embed(num_embeddings=self.codebook_size, features=self.codebook_dim,
+                                 embedding_init=nn.initializers.normal())
 
     def __call__(self, z) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """Quantized the input tensor using a fixed codebook and returns the corresponding codebook vectors
@@ -219,6 +216,10 @@ class ResidualVectorQuantize(nn.Module):
 
         codes = jnp.stack(codebook_indices, axis=2)
         latents = jnp.concatenate(latents, axis=2)
+
+        # normalize based on number of codebooks
+        commitment_loss = commitment_loss / self.n_codebooks
+        codebook_loss = codebook_loss / self.n_codebooks
 
         return z_q, codes, latents, commitment_loss, codebook_loss
 

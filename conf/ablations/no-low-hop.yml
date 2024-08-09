@@ -2,13 +2,13 @@ $include:
   - conf/base.yml
   - conf/1gpu.yml
 
-MelSpectrogramLoss.n_mels: [80]
-MelSpectrogramLoss.window_lengths: [512]
-MelSpectrogramLoss.mel_fmin: [0]
-MelSpectrogramLoss.mel_fmax: [null]
-MelSpectrogramLoss.pow: 1.0
-MelSpectrogramLoss.clamp_eps: 1.0e-5
-MelSpectrogramLoss.mag_weight: 0.0
+mel_spectrogram_loss.n_mels: [80]
+mel_spectrogram_loss.window_lengths: [512]
+mel_spectrogram_loss.lower_edge_hz: [0]
+mel_spectrogram_loss.upper_edge_hz: [null]
+mel_spectrogram_loss.pow: 1.0
+mel_spectrogram_loss.clamp_eps: 1.0e-5
+mel_spectrogram_loss.mag_weight: 0.0
 
 lambdas:
   mel/loss: 100.0

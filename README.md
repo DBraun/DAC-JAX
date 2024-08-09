@@ -18,14 +18,9 @@ You can read the DAC-JAX paper [here](https://arxiv.org/abs/2405.11554).
 
 2. Install the **CPU** version of [PyTorch](https://pytorch.org/). We strongly suggest the CPU version because trying to install a GPU version can conflict with JAX's CUDA-related installation.
 
-3. Install the **CPU** version of [TensorFlow](https://www.tensorflow.org/install)
-    ```bash
-    pip install tensorflow-cpu
-    ```
+3. Install [JAX](https://jax.readthedocs.io/en/latest/installation.html) (with GPU support).
 
-4. Install [JAX](https://jax.readthedocs.io/en/latest/installation.html) (with GPU support).
-
-5. Install DAC-JAX with one of the following:
+4. Install DAC-JAX with one of the following:
 
     <!-- ```
     python -m pip install dac-jax
@@ -186,11 +181,10 @@ python -m pytest tests
 Pull requests—especially ones which address any of the limitations below—are welcome.
 
 * PyTorch is required as a dependency because it's used to load model weights before converting to JAX. As long as this is required, we recommend installing the CPU version of [PyTorch](https://pytorch.org/get-started/locally/).
-* We hope to remove [audiotools](https://github.com/descriptinc/audiotools) as a dependency since it's a PyTorch library.
 * We implement the "chunked" `compress`/`decompress` methods from the PyTorch repository, although this technique has some problems outlined [here](https://github.com/descriptinc/descript-audio-codec/issues/39).
 * We have not performed a full training run, although we have tested the train scripts, loss functions and eval metrics.
 * If you want to perform a training run—especially one which reproduces the original paper—you should examine any "todo" in `train.py` or in the config files.
-* We have not run all evaluation scripts in the `scripts` directory.
+* We have not run all evaluation scripts in the `scripts` directory. For some of them, it makes sense to just keep using PyTorch instead of JAX.
 * The model architecture code (`model/dac.py`) has many static methods to help with finding DAC's `delay` and `output_length`. Please help us refactor this so that code is not so duplicated and at risk of typos.
 * In `audio_utils.py` we use [DM_AUX's](https://github.com/google-deepmind/dm_aux) STFT function instead of `jax.scipy.signal.stft`.
 * The source code of DAC-JAX has several `todo:` markings which indicate (mostly minor) improvements we'd like to have.

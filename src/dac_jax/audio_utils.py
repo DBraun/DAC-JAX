@@ -1,19 +1,15 @@
-import math
-from typing import Optional, Union, Tuple, List
-from pathlib import Path
-from functools import partial
 import glob
+import math
+from pathlib import Path
+from typing import List, Optional, Tuple, Union
 
 import chex
-
-import jax.scipy.signal
-import jax.numpy as jnp
-
-import jaxloudnorm as jln
-
 import dm_aux as aux
-
 from einops import rearrange
+import jax.numpy as jnp
+import jax.scipy.signal
+import jaxloudnorm as jln
+import librosa
 
 
 def find_audio(folder: Union[str, Path], ext: List[str] = None) -> List[Path]:
@@ -52,7 +48,7 @@ def find_audio(folder: Union[str, Path], ext: List[str] = None) -> List[Path]:
 
 
 def compute_stft_padding(length, window_length: int, hop_length: int, match_stride: bool):
-    """Compute how the STFT should be padded, based on match\_stride.
+    """Compute how the STFT should be padded, based on match_stride.
 
     Parameters
     ----------
@@ -95,77 +91,68 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
 
     right_pad, pad = compute_stft_padding(audio_length, frame_length, frame_step, match_stride)
     x = jnp.pad(x, pad_width=((0, 0), (0, 0), (pad, pad + right_pad)), mode=padding_type)
+
     x = rearrange(x, 'b c t -> (b c) t')
 
-    if True or (frame_length < 128):  # todo: https://github.com/google-deepmind/dm_aux/issues/2
-        stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window)
-        stft_data = rearrange(stft_data, '(b c) nt nf -> b c nf nt', b=batch_size)
-    else:
-        _, _, stft_data = jax.scipy.signal.stft(x,
-                                                window=window,
-                                                nperseg=frame_length,
-                                                noverlap=(frame_length - frame_step),
-                                                nfft=frame_length,
-                                                detrend=False,
-                                                return_onesided=True,
-                                                boundary='zeros',
-                                                padded=True,
-                                                )
-        stft_data = rearrange(stft_data, '(b c) nf nt -> b c nf nt', b=batch_size)
+    # todo: https://github.com/google-deepmind/dm_aux/issues/2
+    stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window,
+                                  pad_mode=padding_type, pad=aux.spectral.Pad.BOTH)
+    stft_data = rearrange(stft_data, '(b c) nt nf -> b c nf nt', b=batch_size)
 
     if match_stride:
         # Drop first two and last two frames, which are added
         # because of padding. Now num_frames * hop_length = num_samples.
-        stft_data = stft_data[..., 2:-2]
+        if hop_factor == 0.25:
+            stft_data = stft_data[..., 2:-2]
+        else:
+            # I think this would be correct if DAC torch ever allowed match_stride==True and hop_factor==0.5
+            stft_data = stft_data[..., 1:-1]
 
     return stft_data
 
 
-def istft(stft_matrix: chex.Array,
-          window: Optional[Union[str, float, Tuple[str, float]]] = 'hann',
-          length: Optional[int] = None) -> chex.Array:
-    """
-    Computes the inverse Short-time Fourier Transform (iSTFT) of the signal using jax.scipy.signal.istft.
+def mel_spectrogram(
+    spectrograms: chex.Array,
+    log_scale: bool = True,
+    sample_rate: int = 16000,
+    frame_length: Optional[int] = 2048,
+    num_features: int = 128,
+    lower_edge_hertz: float = 0.0,
+    upper_edge_hertz: Optional[float] = None,
+    ) -> chex.Array:
+    """Converts the spectrograms to Mel-scale.
+
+    Adapted from dm_aux:
+    https://github.com/google-deepmind/dm_aux/blob/77f5ed76df2928bac8550e1c5466c0dac2934be3/dm_aux/spectral.py#L312
+
+    https://en.wikipedia.org/wiki/Mel_scale
 
     Args:
-        stft_matrix: input complex matrix of shape [batch_size, num_frames, n_fft // 2 + 1].
-        frame_length: the size of each signal frame. If unspecified it defaults to be equal to `n_fft`.
-        frame_step: the hop size of extracting signal frames. If unspecified it defaults to be equal to `int(frame_length // 2)`.
-        window: applied to each frame to remove the discontinuities at the edge of the frame introduced by segmentation.
-        pad: pad the signal at the end(s) by `int(n_fft // 2)`. Can either be `Pad.NONE`, `Pad.START`, `Pad.END`, `Pad.BOTH`, `Pad.ALIGNED`.
-        length: the trim length of the time domain signal to output.
-        precision: precision of the convolution. Either `None`, which means the default precision for the backend, or a `lax.Precision` enum value.
+    spectrograms: Input spectrograms of shape [batch_size, time_steps,
+      num_features].
+    log_scale: Whether to return the mel_filterbanks in the log scale.
+    sample_rate: The sample rate of the input audio.
+    frame_length: The length of each spectrogram frame.
+    num_features: The number of mel spectrogram features.
+    lower_edge_hertz: Lowest frequency to consider to general mel filterbanks.
+    upper_edge_hertz: Highest frequency to consider to general mel filterbanks.
+      If None, use `sample_rate / 2.0`.
 
     Returns:
-        The reconstructed time domain signal of shape `[batch_size, signal_length]`.
-
-    Reference:
-    https://github.com/descriptinc/audiotools/blob/7776c296c711db90176a63ff808c26e0ee087263/audiotools/core/audio_signal.py#L1214
+    Converted spectrograms in (log) Mel-scale.
     """
-    # Compute iSTFT
-    _, reconstructed_signal = jax.scipy.signal.istft(stft_matrix,
-                                                     fs=1.0,
-                                                     window=window,
-                                                     input_onesided=True,
-                                                     boundary=True,
-                                                     # padded=True,
-    )
+    # This setup mimics tf.signal.linear_to_mel_weight_matrix.
+    linear_to_mel_weight_matrix = librosa.filters.mel(
+        sr=sample_rate, n_fft=frame_length, n_mels=num_features,
+        fmin=lower_edge_hertz, fmax=upper_edge_hertz).T
+    spectrograms = jnp.matmul(spectrograms, linear_to_mel_weight_matrix)
 
-    # Trim or pad the output signal to the desired length
-    if length is not None:
-        if length > reconstructed_signal.shape[-1]:
-            # Pad the signal if it is shorter than the desired length
-            pad_width = length - reconstructed_signal.shape[-1]
-            reconstructed_signal = jnp.pad(reconstructed_signal, ((0, 0), (0, 0), (0, pad_width)), mode='constant')
-        else:
-            # Trim the signal if it is longer than the desired length
-            reconstructed_signal = reconstructed_signal[..., :length]
-
-    return reconstructed_signal
+    if log_scale:
+        spectrograms = jnp.log(spectrograms + 1e-6)
+    return spectrograms
 
 
 def decibel_loudness(stft_data: jnp.ndarray, clamp_eps=1e-5, pow=2.) -> jnp.ndarray:
-    # todo: maybe do maximum right before log10
     return jnp.log10(jnp.power(jnp.maximum(jnp.abs(stft_data), clamp_eps), pow))
 
 
@@ -180,6 +167,7 @@ def volume_norm(
         filter_class: str = "K-weighting",
         block_size: float = 0.400,
         min_loudness: float = -70,
+        zeros: int = 2048,
 ):
     """Calculates loudness using an implementation of ITU-R BS.1770-4.
     Allows control over gating block size and frequency weighting filters for
@@ -210,6 +198,8 @@ def volume_norm(
         Gating block size in seconds, by default 0.400
     min_loudness : float, optional
         Minimum loudness in decibels
+    zeros : int, optional
+        The length of the FIR filter. You should pick a power of 2 between 512 and 4096.
 
     Returns
     -------
@@ -227,10 +217,11 @@ def volume_norm(
     signal_duration = original_length / sample_rate
 
     if signal_duration < block_size:
-        padded_audio = jnp.pad(padded_audio, pad_width=((0, 0), (0, 0), (0, int(block_size*sample_rate)-original_length)))
+        padded_audio = jnp.pad(padded_audio,
+                               pad_width=((0, 0), (0, 0), (0, int(block_size*sample_rate)-original_length)))
 
     # create BS.1770 meter
-    meter = jln.Meter(sample_rate, filter_class=filter_class, block_size=block_size)
+    meter = jln.Meter(sample_rate, filter_class=filter_class, block_size=block_size, use_fir=True, zeros=zeros)
 
     # measure loudness
     loudness = jax.vmap(meter.integrated_loudness)(rearrange(padded_audio, 'b c t -> b t c'))
@@ -240,32 +231,3 @@ def volume_norm(
     audio_data = audio_data * db2linear(target_db-loudness)[:, None, None]
 
     return audio_data, loudness
-
-
-def phase_shift(
-        audio_data: jnp.ndarray,
-        amt: jnp.ndarray,  # -jnp.pi to jnp.pi
-):
-    length = audio_data.shape[2]
-    hop_factor = 0.5
-    frame_length = 2048
-    window = 'hann'
-
-    stft_fun = partial(stft, frame_length=frame_length, hop_factor=hop_factor, window=window, match_stride=False,
-                       padding_type='reflect')
-    istft_fun = partial(istft, window=window, length=length)
-
-    stft_data = stft_fun(audio_data)
-    stft_data = stft_data * jnp.exp(1j * amt)[:, None, None]
-    audio_data = istft_fun(stft_data)
-
-    return audio_data
-
-
-def rescale_audio(audio_data: jnp.ndarray) -> jnp.ndarray:
-    """Rescales audio to the range [-1, 1] only if the original audio exceeds those bounds. Useful if transforms have
-    caused the audio to clip. It won't change the relative balance of multichannel audio."""
-    maxes = jnp.max(jnp.absolute(audio_data), axis=[-2, -1], keepdims=True)
-    maxes = jnp.maximum(maxes, jnp.ones_like(maxes))
-    audio_data = audio_data / maxes
-    return audio_data

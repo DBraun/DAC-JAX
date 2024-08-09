@@ -23,7 +23,7 @@ def sinc(x):
     return jnp.sinc(x / jnp.pi)
 
 
-def resample(x: jnp.ndarray, old_sr: int, new_sr: int, zeros: int=24, rolloff: float = 0.945,
+def resample(x: jnp.ndarray, old_sr: int, new_sr: int, zeros: int = 24, rolloff: float = 0.945,
              output_length: Optional[int] = None, full: bool = False) -> jnp.ndarray:
 
     """Resampling algorithm adapted from the pytorch library Julius:

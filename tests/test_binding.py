@@ -1,5 +1,5 @@
 import dac_jax
-from dac_jax.audio_utils import volume_norm, db2linear
+from dac_jax.audio_utils import volume_norm
 
 import jax.numpy as jnp
 import librosa
@@ -29,6 +29,9 @@ def test_binding():
 
     # Decode audio signal
     y = model.decode(z, length=signal.shape[-1])
+
+    def db2linear(decibels):
+        return jnp.pow(10.0, decibels / 20.0)
 
     # Undo previous loudness normalization
     y = y * db2linear(input_db - target_db)

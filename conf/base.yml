@@ -9,7 +9,7 @@ DAC.decoder_rates: [8, 8, 4, 2]
 DAC.n_codebooks: 9
 DAC.codebook_size: 1024
 DAC.codebook_dim: 8
-DAC.quantizer_dropout: 1.0  # bool
+DAC.quantizer_dropout: 1.0
 
 # Discriminator
 Discriminator.sample_rate: 44100
@@ -23,39 +23,48 @@ Discriminator.bands:
   - [0.5, 0.75]
   - [0.75, 1.0]
 
+# Schedules
+create_generator_schedule.learning_rate: 1e-4
+create_generator_schedule.lr_gamma: 0.999996
+
+create_discriminator_schedule.learning_rate: 1e-4
+create_discriminator_schedule.lr_gamma: 0.999996
+
 # Optimization
-create_generator.adam_b1: 0.8
-create_generator.adam_b2: 0.99
-create_generator.learning_rate: 1e-4
-create_generator.lr_gamma: 0.999996
+create_generator_optimizer.adam_b1: 0.8
+create_generator_optimizer.adam_b2: 0.99
+create_generator_optimizer.grad_clip: 1e3
 
-create_discriminator.adam_b1: 0.8
-create_discriminator.adam_b2: 0.99
-create_discriminator.learning_rate: 1e-4
-create_discriminator.lr_gamma: 0.999996
+create_discriminator_optimizer.adam_b1: 0.8
+create_discriminator_optimizer.adam_b2: 0.99
+create_discriminator_optimizer.grad_clip: 10
 
-train_step_generator.lambdas:
+lambdas:
   mel/loss: 15.0
-  adv/feat_loss: 2.0
-  adv/gen_loss: 1.0
-  vq/commitment_loss: 0.25
-  vq/codebook_loss: 1.0
-
-eval_step.lambdas:
-  mel/loss: 15.0
-  adv/feat_loss: 2.0
-  adv/gen_loss: 1.0
-  vq/commitment_loss: 0.25
-  vq/codebook_loss: 1.0
+  adv/feat_loss: 200  # 2.0 * (5+5+5+5+5+25+25+25) = 2.0 * 100
+                      # 2.0 comes from the PyTorch DAC base.yml Then we multiply since we normalized the magnitude
+                      # of our feature loss differently than the PyTorch version.
+                      # 5 is (6-1) where 6 is number of convs in MPD. Then there are 5 of these because the
+                      # number of periods is 5.
+                      # 25 is number of bands (5) times the number of convs (5) in MRD. Then there are 3 of these
+                      # because of the number of fft sizes is 3.
+  adv/gen_loss: 8  # 1.0 * 8 where 8 is number of Discriminator rates+periods+fft sizes = (0+5+3)
+                   # 1.0 comes from the PyTorch DAC base.yml
+  vq/commitment_loss: 2.25  # 0.25 * 9 since we normalize based on the number of codebooks.
+  vq/codebook_loss: 9  # 1 * 9 since we normalized based on the number of codebooks.
 
 train.batch_size: 72
 train.val_batch_size: 100
+train.sample_batch_size: 100
 train.num_iterations: 250000
 train.valid_freq: 1000
 train.sample_freq: 10000
-train.early_stop_patience: 4
 train.ckpt_max_keep: 4
 train.seed: 0
+train.tabulate: 1
+
+EarlyStopping.min_delta: .001
+EarlyStopping.patience: 4
 
 log_training.log_every_steps: 10
 
@@ -71,13 +80,43 @@ mel_spectrogram_loss.clamp_eps: 1.0e-5
 mel_spectrogram_loss.mag_weight: 0.0
 
 # Data Augmentation
-augment_data.min_db: -16
-augment_data.max_db: -16
+VolumeNorm.config:
+  min_db: -16
+  max_db: -16
+
+train/build_transforms.augment:
+  - VolumeNorm
+  - RescaleAudio
+  - ShiftPhase
+
+val/build_transforms.augment:
+  - VolumeNorm
+  - RescaleAudio
+
+sample/build_transforms.augment:
+  - VolumeNorm
+  - RescaleAudio
 
 # Data
+# See salient_excerpt in Descript AudioTools.
+train/SaliencyParams.enabled: 1
+train/SaliencyParams.num_tries: 8
+train/SaliencyParams.loudness_cutoff: -40
+
+# Data
+create_dataset.extensions:
+  - .wav
+  - .flac
+  - .ogg
+  - .mp3
+
 train/create_dataset.duration: 0.38
-train/create_dataset.random_offset: 1.0  # bool
-train/create_dataset.shuffle: 1.0  # bool
+val/create_dataset.duration: 5.0
+sample/create_dataset.duration: 5.0
+test/create_dataset.duration: 10.0
+
+val/create_dataset.num_steps: 4
+
 train/create_dataset.sources:
   speech_fb:
     - /data/daps/train
@@ -100,7 +139,6 @@ train/create_dataset.sources:
     - /data/audioset/data/unbalanced_train_segments/
     - /data/audioset/data/balanced_train_segments/
 
-val/create_dataset.duration: 5.0
 val/create_dataset.sources:
   speech_hq:
     - /data/daps/val
@@ -109,7 +147,14 @@ val/create_dataset.sources:
   general:
     - /data/audioset/data/eval_segments/
 
-test/create_dataset.duration: 10.0
+sample/create_dataset.sources:
+  speech_hq:
+    - /data/daps/val
+  music_hq:
+    - /data/musdb/test
+  general:
+    - /data/audioset/data/eval_segments/
+
 test/create_dataset.sources:
   speech_hq:
     - /data/daps/test

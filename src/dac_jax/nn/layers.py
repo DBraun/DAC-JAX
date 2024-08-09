@@ -1,8 +1,6 @@
 import math
-from typing import Optional, Union, Sequence
+from typing import Optional, Sequence, Union
 
-import jax
-import jax.numpy as jnp
 import flax.linen as nn
 from flax.typing import (
   Array,
@@ -11,10 +9,10 @@ from flax.typing import (
   PaddingLike,
   Initializer,
 )
+import jax
+import jax.numpy as jnp
 
-
-def truncated_normal(stddev=1e-2):
-    return lambda key, shape, dtype=jnp.float32: jax.random.truncated_normal(key, -2, 2, shape, dtype) * stddev
+from .weight_norm import WeightNorm as MyWeightNorm
 
 
 def default_stride(strides):
@@ -65,10 +63,16 @@ def convtranspose_to_output_length(s, d, k, L):
     return L
 
 
-class WNConv1d(nn.Module):
+class LeakyReLU(nn.Module):
 
-    # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
-    # kernel_init: nn.initializers.variance_scaling(.02, mode='fan_in', distribution='truncated_normal', dtype=jnp.float32)
+    negative_slope: float = .01
+
+    @nn.compact
+    def __call__(self, x):
+        return nn.leaky_relu(x, negative_slope=self.negative_slope)
+
+
+class WNConv1d(nn.Module):
 
     features: int
     kernel_size: Union[int, Sequence[int]]
@@ -82,8 +86,10 @@ class WNConv1d(nn.Module):
     dtype: Optional[Dtype] = None
     param_dtype: Dtype = jnp.float32
     precision: PrecisionLike = None
-    kernel_init: nn.initializers.Initializer = truncated_normal(0.02)  # note: non-standard
-    bias_init: nn.initializers.Initializer = nn.initializers.zeros  # note: non-standard
+    # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
+    # https://github.com/google/flax/issues/4091
+    kernel_init: nn.initializers.Initializer = jax.nn.initializers.truncated_normal(.02, lower=-2/.02, upper=2/.02)
+    bias_init: nn.initializers.Initializer = nn.initializers.zeros
 
     @nn.compact
     def __call__(self, x):
@@ -103,7 +109,9 @@ class WNConv1d(nn.Module):
             kernel_init=self.kernel_init,
             bias_init=self.bias_init
         )
-        block = nn.WeightNorm(conv)  # note: we use the epsilon default
+        # MyWeightNorm initializes itself as if the conv had been initialized the way PyTorch would have instead
+        # of what we did (truncated normal).
+        block = MyWeightNorm(conv)
         x = block(x)
         return x
 
@@ -137,7 +145,7 @@ class WNConvTranspose1d(nn.Module):
     dtype: Optional[Dtype] = None
     param_dtype: Dtype = jnp.float32
     precision: PrecisionLike = None
-    kernel_init: Initializer = nn.initializers.lecun_normal()
+    kernel_init: Initializer = nn.initializers.variance_scaling(1/3, "fan_out", "uniform")  # to match PyTorch
     bias_init: Initializer = nn.initializers.zeros_init()
     transpose_kernel = True  # note: non-standard
 

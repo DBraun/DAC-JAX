@@ -1,35 +1,26 @@
 from dataclasses import field
+
+from einops import rearrange
+import flax.linen as nn
 import jax.numpy as jnp
 import jax.scipy.signal
-import flax.linen as nn
-from einops import rearrange
 
 from dac_jax.resample import resample
 from dac_jax.audio_utils import stft
+from dac_jax.nn.layers import LeakyReLU
 
 
-class LeakyReLU(nn.Module):
-
-    negative_slope: float = .01
-
-    @nn.compact
-    def __call__(self, x):
-        return nn.leaky_relu(x, negative_slope=self.negative_slope)
-
-
-def WNConv1d(*args, act=True, **kwargs):
-    # todo: pick kernel_init and bias_init to match PyTorch defaults
-    # https://github.com/google/jax/issues/4862
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs))]
+def disc_WNConv1d(*args, act=True, **kwargs):
+    kernel_init = nn.initializers.variance_scaling(1/3, "fan_in", "uniform")  # same as PyTorch
+    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=kernel_init))]
     if act:
         layers.append(LeakyReLU(0.1))
     return nn.Sequential(layers)
 
 
 def WNConv2d(*args, act=True, **kwargs):
-    # todo: pick kernel_init and bias_init to match PyTorch defaults
-    # https://github.com/google/jax/issues/4862
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs))]
+    kernel_init = nn.initializers.variance_scaling(1/3, "fan_in", "uniform")  # same as PyTorch?
+    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=kernel_init))]
     if act:
         layers.append(LeakyReLU(0.1))
     return nn.Sequential(layers)
@@ -75,13 +66,13 @@ class MSD(nn.Module):
     @nn.compact
     def __call__(self, x):
         convs = [
-            WNConv1d(features=16, kernel_size=15, strides=1, padding=7),
-            WNConv1d(features=64, kernel_size=41, strides=4, feature_group_count=4, padding=20),
-            WNConv1d(features=256, kernel_size=41, strides=4, feature_group_count=16, padding=20),
-            WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=64, padding=20),
-            WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=256, padding=20),
-            WNConv1d(features=1024, kernel_size=5, strides=1, padding=2),
-            WNConv1d(features=1, kernel_size=3, strides=1, padding=1, act=False)
+            disc_WNConv1d(features=16, kernel_size=15, strides=1, padding=7),
+            disc_WNConv1d(features=64, kernel_size=41, strides=4, feature_group_count=4, padding=20),
+            disc_WNConv1d(features=256, kernel_size=41, strides=4, feature_group_count=16, padding=20),
+            disc_WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=64, padding=20),
+            disc_WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=256, padding=20),
+            disc_WNConv1d(features=1024, kernel_size=5, strides=1, padding=2),
+            disc_WNConv1d(features=1, kernel_size=3, strides=1, padding=1, act=False)
         ]
 
         x = resample(x, old_sr=self.sample_rate, new_sr=self.sample_rate//self.rate)
@@ -150,7 +141,7 @@ class MRD(nn.Module):
                 fmap.append(band)
             x.append(band)
 
-        x = jnp.concatenate(x, axis=-2)
+        x = jnp.concatenate(x, axis=-2)  # concatenate along frequency axis
         x = conv_post(x)
         fmap.append(x)
 
@@ -170,10 +161,7 @@ class MRD(nn.Module):
         if not jnp.issubdtype(x.dtype, jnp.complexfloating):
             return x
 
-        xr = jnp.zeros(x.shape+(2,), dtype=x.real.dtype)
-        xr = xr.at[..., 0].set(x.real)
-        xr = xr.at[..., 1].set(x.imag)
-        return xr
+        return jnp.stack([x.real, x.imag], axis=-1)
 
 
 class Discriminator(nn.Module):
