@@ -431,7 +431,7 @@ class DAC(nn.Module):
             "length" : int
                 Number of samples in input audio
         """
-        assert not self.padding, "Padding must be disabled in order to compress audio."
+        assert not self.padding, "Padding must be disabled in order to use a \"chunk\" method."
         audio_data = self.preprocess(audio_data, self.sample_rate)
 
         z = self.encoder(audio_data)
@@ -461,13 +461,12 @@ class DAC(nn.Module):
         return audio
 
     def decompress_chunk(self, c):
-        assert not self.padding, "Padding must be disabled in order to decompress audio."
+        assert not self.padding, "Padding must be disabled in order to use a \"chunk\" method."
         z, _, _ = self.quantizer.from_codes(c)
         r = self.decode(z)
         return r
 
     def from_codes(self, c):
-        assert not self.padding
         z, _, _ = self.quantizer.from_codes(c)
         return z
 
