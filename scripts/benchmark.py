@@ -14,6 +14,7 @@ def benchmark_dac(model_type="44khz", model_bitrate='8kbps', win_durations: List
     else:
         win_durations = [float(x) for x in win_durations]
 
+    # Set padding to False since we're using chunk functions.
     model, variables = load_model(model_type=model_type, model_bitrate=model_bitrate, padding=False)
 
     @jax.jit
@@ -42,7 +43,7 @@ def benchmark_dac(model_type="44khz", model_bitrate='8kbps', win_durations: List
 
 if __name__ == "__main__":
     # example usage:
-    # python3 benchmark.py --model_type 16khz --win_durations "0.5 1 5 10 20"
+    # python3 benchmark.py --model_type=16khz --win_durations="0.5 1 5 10 20"
     print(f'devices: {jax.devices()}')
 
     args = argbind.parse_args()

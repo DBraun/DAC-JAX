@@ -70,18 +70,23 @@ def _jax_padding(np_data) -> dict[np.array]:
 
     model, variables = dac_jax.load_model(model_type="44khz")
 
-    y = model.apply(variables, jnp.array(np_data), train=False)
+    y = model.apply(variables, jnp.array(np_data), model.sample_rate, method="preprocess")
+    y = model.apply(variables, y, train=False)
     y['z'] = y['z'].transpose(0, 2, 1)
     y['codes'] = y['codes'].transpose(0, 2, 1)
     y['latents'] = y['latents'].transpose(0, 2, 1)
 
-    y = jax.tree_map(lambda x: np.array(x), y)
+    # Multiply by model.n_codebooks since we normalize by n_codebooks and torch doesn't.
+    y['vq/commitment_loss'] = y['vq/commitment_loss']*model.n_codebooks
+    y['vq/codebook_loss'] = y['vq/codebook_loss']*model.n_codebooks
+
+    y = jax.tree.map(lambda x: np.array(x), y)
     return y
 
 
 def _jax_compress(np_data, win_duration: float):
 
-    # set padding to False since we're doing compress
+    # set padding to False since we're using the chunk functions
     model, variables = dac_jax.load_model(model_type='44khz', padding=False)
     sample_rate = 44100
 

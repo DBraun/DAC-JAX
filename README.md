@@ -128,7 +128,7 @@ import jax
 import jax.numpy as jnp
 import librosa
 
-# Download a model and set padding to False because we will use the JIT-functions.
+# Download a model and set padding to False because we will use the chunk functions.
 model, variables = dac_jax.load_model(model_type="44khz", padding=False)
 
 # Load a mono audio file
