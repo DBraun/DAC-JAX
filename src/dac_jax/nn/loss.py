@@ -94,7 +94,7 @@ def sisdr_loss(y_true: jnp.ndarray,
     sdr = -10 * jnp.log10(signal / noise + eps)
 
     if clip_min is not None:
-        sdr = jnp.clip(sdr, a_min=clip_min)
+        sdr = jnp.maximum(sdr, clip_min)
 
     if reduction == "mean":
         sdr = sdr.mean()
