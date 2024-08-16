@@ -77,7 +77,7 @@ def test_mel_loss_same_as_dac_torch(length: int):
     sample_rate = 44100
 
     x1 = np.random.uniform(low=-1, high=1, size=(1, 1, length))
-    x2 = x1*0.9
+    x2 = x1*0.5
 
     signal1 = AudioSignal(x1, sample_rate=sample_rate)
     signal2 = AudioSignal(x2, sample_rate=sample_rate)
@@ -94,7 +94,7 @@ def test_multiscale_stft_loss_same_as_dac_torch(length: int):
     sample_rate = 44100
 
     x1 = np.random.uniform(low=-1, high=1, size=(1, 1, length))
-    x2 = x1*0.9
+    x2 = x1*0.5
 
     signal1 = AudioSignal(x1, sample_rate=sample_rate)
     signal2 = AudioSignal(x2, sample_rate=sample_rate)
