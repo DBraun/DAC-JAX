@@ -14,9 +14,9 @@ from functools import partial
 from grain import python as grain
 import jax
 from jax import random
-from jax.sharding import NamedSharding, Mesh, PartitionSpec as P
-from jax.experimental.shard_map import shard_map
 from jax.experimental import mesh_utils
+from jax.experimental.shard_map import shard_map
+from jax.sharding import NamedSharding, Mesh, PartitionSpec as P
 
 
 # Transforms

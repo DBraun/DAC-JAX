@@ -26,29 +26,29 @@ from typing import List, Mapping, Tuple
 import warnings
 
 import jax
-
 jax.config.update("jax_threefry_partitionable", True)
 assert jax.config.jax_threefry_partitionable is True
 assert jax.config.jax_default_prng_impl == "threefry2x32"
-from jax import random, numpy as jnp
-from jax.sharding import NamedSharding, Mesh, PartitionSpec
+from jax import numpy as jnp
+from jax import random
 from jax.experimental import mesh_utils
+from jax.sharding import NamedSharding, Mesh, PartitionSpec
 
 from absl import logging
 import argbind
+from audiotree import AudioTree
 from clu import metric_writers, periodic_actions
 from clu.metrics import Average, Collection
 from einops import rearrange
+from flax import linen as nn
+from flax import struct
 from flax.training import common_utils
 from flax.training.early_stopping import EarlyStopping
 from flax.training.train_state import TrainState
-from flax import struct
-from flax import linen as nn
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
 
-from audiotree import AudioTree
 from dac_jax import load_model
 from dac_jax.model import DAC, Discriminator
 from dac_jax.nn.loss import (
@@ -608,6 +608,7 @@ def train(
         key = random.key(seed)
         key, subkey = random.split(key)
 
+        logging.info("Creating generator state.")
         generator_state: TrainState = jax.jit(
             partial(
                 create_generator,
@@ -619,6 +620,7 @@ def train(
             out_shardings=generator_state_sharding,
         )(subkey, batch)
 
+        logging.info("Creating discriminator state.")
         key, subkey = random.split(key)
         discriminator_state: TrainState = jax.jit(
             partial(
