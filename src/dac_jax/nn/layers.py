@@ -130,27 +130,32 @@ class WNConv1d(nn.Module):
         return conv_to_output_length(s, d, k, L)
 
 
-class WNConvTranspose1d(nn.Module):
+class WNConvTranspose1d(nn.ConvTranspose):
 
-    # Note: set tranpose_kernel=True because PyTorch's kernels are transposed relative to JAX.
-    # https://flax.readthedocs.io/en/latest/guides/converting_and_upgrading/convert_pytorch_to_flax.html#transposed-convolutions
-
-    features: int
-    kernel_size: Union[int, Sequence[int]]
-    strides: Optional[Sequence[int]] = None
-    padding: PaddingLike = 'SAME'
-    kernel_dilation: Optional[Sequence[int]] = None
-    use_bias = True
-    mask: Optional[Array] = None
-    dtype: Optional[Dtype] = None
-    param_dtype: Dtype = jnp.float32
-    precision: PrecisionLike = None
-    kernel_init: Initializer = nn.initializers.variance_scaling(1/3, "fan_out", "uniform")  # to match PyTorch
-    bias_init: Initializer = nn.initializers.zeros_init()
-    transpose_kernel = True  # note: non-standard
+    @staticmethod
+    def make_initializer(out_channels, in_channels, kernel_size, groups):
+        # https://pytorch.org/docs/stable/generated/torch.nn.ConvTranspose1d.html
+        k = groups / (out_channels * jnp.prod(jnp.array(kernel_size)))
+        scale = jnp.sqrt(k)
+        return lambda key, shape, dtype: jax.random.uniform(key, shape, minval=-scale, maxval=scale, dtype=dtype)
 
     @nn.compact
     def __call__(self, x):
+
+        groups = 1
+        # note: we just ignore whatever self.kernel_init is
+        kernel_init = self.make_initializer(
+            self.features, x.shape[-1], self.kernel_size, groups
+        )
+
+        if self.use_bias:
+            # note: we just ignore whatever self.bias_init is
+            bias_init = self.make_initializer(
+                self.features, x.shape[-1], self.kernel_size, groups
+            )
+        else:
+            bias_init = None
+
         conv = nn.ConvTranspose(
             features=self.features,
             kernel_size=self.kernel_size,
@@ -162,9 +167,9 @@ class WNConvTranspose1d(nn.Module):
             dtype=self.dtype,
             param_dtype=self.param_dtype,
             precision=self.precision,
-            kernel_init=self.kernel_init,
-            bias_init=self.bias_init,
-            transpose_kernel=self.transpose_kernel
+            kernel_init=kernel_init,
+            bias_init=bias_init,
+            transpose_kernel=True  # note: this helps us load weights from PyTorch
         )
         block = nn.WeightNorm(conv)  # note: we use the epsilon default
         x = block(x)

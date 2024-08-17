@@ -10,17 +10,57 @@ from dac_jax.audio_utils import stft
 from dac_jax.nn.layers import LeakyReLU
 
 
+class CustomConv1d(nn.Conv):
+
+    @staticmethod
+    def make_initializer(out_channels, in_channels, kernel_size, groups):
+        # https://pytorch.org/docs/stable/generated/torch.nn.Conv1d.html
+        k = groups / (in_channels * jnp.prod(jnp.array(kernel_size)))
+        scale = jnp.sqrt(k)
+        return lambda key, shape, dtype: jax.random.uniform(key, shape, minval=-scale, maxval=scale, dtype=dtype)
+
+    @nn.compact
+    def __call__(self, x):
+
+        kernel_init = self.make_initializer(
+            self.features, x.shape[-1], self.kernel_size, self.feature_group_count
+        )
+
+        if self.use_bias:
+            # note: we just ignore whatever self.bias_init is
+            bias_init = self.make_initializer(
+                self.features, x.shape[-1], self.kernel_size, self.feature_group_count
+            )
+        else:
+            bias_init = None
+
+        return nn.Conv(
+            features=self.features,
+            kernel_size=self.kernel_size,
+            strides=self.strides,
+            padding=self.padding,
+            input_dilation=self.input_dilation,
+            kernel_dilation=self.kernel_dilation,
+            feature_group_count=self.feature_group_count,
+            use_bias=self.use_bias,
+            mask=self.mask,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+            precision=self.precision,
+            kernel_init=kernel_init,
+            bias_init=bias_init
+        )(x)
+
+
 def disc_WNConv1d(*args, act=True, **kwargs):
-    kernel_init = nn.initializers.variance_scaling(1/3, "fan_in", "uniform")  # same as PyTorch
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=kernel_init))]
+    layers = [nn.WeightNorm(CustomConv1d(*args, **kwargs))]
     if act:
         layers.append(LeakyReLU(0.1))
     return nn.Sequential(layers)
 
 
 def WNConv2d(*args, act=True, **kwargs):
-    kernel_init = nn.initializers.variance_scaling(1/3, "fan_in", "uniform")  # same as PyTorch?
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=kernel_init))]
+    layers = [nn.WeightNorm(CustomConv1d(*args, **kwargs))]
     if act:
         layers.append(LeakyReLU(0.1))
     return nn.Sequential(layers)
@@ -211,10 +251,10 @@ if __name__ == "__main__":
     disc = Discriminator()
     x = jnp.zeros(shape=(1, 1, 44100))
 
-    # print(disc.tabulate(jax.random.key(1), x,
-    #                     compute_flops=True,
-    #                     compute_vjp_flops=True
-    #                     ))
+    print(disc.tabulate(jax.random.key(1), x,
+                        compute_flops=True,
+                        compute_vjp_flops=True
+                        ))
 
     variables = disc.init(jax.random.key(0), x)
     params = variables['params']
