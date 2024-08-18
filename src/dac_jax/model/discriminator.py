@@ -53,17 +53,17 @@ class CustomConv1d(nn.Conv):
 
 
 def disc_WNConv1d(*args, act=True, **kwargs):
-    layers = [nn.WeightNorm(CustomConv1d(*args, **kwargs))]
-    if act:
-        layers.append(LeakyReLU(0.1))
-    return nn.Sequential(layers)
+    conv = nn.WeightNorm(CustomConv1d(*args, **kwargs))
+    if not act:
+        return conv
+    return nn.Sequential([conv, LeakyReLU(negative_slope=0.1)])
 
 
 def WNConv2d(*args, act=True, **kwargs):
-    layers = [nn.WeightNorm(CustomConv1d(*args, **kwargs))]
-    if act:
-        layers.append(LeakyReLU(0.1))
-    return nn.Sequential(layers)
+    conv = nn.WeightNorm(CustomConv1d(*args, **kwargs))
+    if not act:
+        return conv
+    return nn.Sequential([conv, LeakyReLU(negative_slope=0.1)])
 
 
 class MPD(nn.Module):
@@ -248,20 +248,26 @@ class Discriminator(nn.Module):
 
 
 if __name__ == "__main__":
+    import numpy as np
+
     disc = Discriminator()
     x = jnp.zeros(shape=(1, 1, 44100))
 
     print(disc.tabulate(jax.random.key(1), x,
-                        compute_flops=True,
-                        compute_vjp_flops=True
+                        # compute_flops=True,
+                        # compute_vjp_flops=True,
+                        depth=3,
+                        # column_kwargs={"width": 400},
+                        console_kwargs={"width": 400},
                         ))
 
-    variables = disc.init(jax.random.key(0), x)
+    variables = disc.init(jax.random.key(3), x)
     params = variables['params']
 
     results = disc.apply({'params': params}, x)
     for i, result in enumerate(results):
         print(f"disc{i}")
-        for i, r in enumerate(result):
-            print(r.shape, r.mean(), r.min(), r.max())
+        for i, _r in enumerate(result):
+            r = np.array(_r)
+            print(r.shape, f"{r.mean().item():,.5f}, {r.min().item():,.5f} {r.max().item():,.5f}")
     print('All Done!')
