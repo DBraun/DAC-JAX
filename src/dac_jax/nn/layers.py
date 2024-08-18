@@ -72,27 +72,16 @@ class LeakyReLU(nn.Module):
         return nn.leaky_relu(x, negative_slope=self.negative_slope)
 
 
-class WNConv1d(nn.Module):
-
-    features: int
-    kernel_size: Union[int, Sequence[int]]
-    strides: Union[None, int, Sequence[int]] = 1
-    padding: PaddingLike = 'SAME'
-    input_dilation: Union[None, int, Sequence[int]] = 1
-    kernel_dilation: Union[None, int, Sequence[int]] = 1
-    feature_group_count: int = 1
-    use_bias = True
-    mask: Optional[Array] = None
-    dtype: Optional[Dtype] = None
-    param_dtype: Dtype = jnp.float32
-    precision: PrecisionLike = None
-    # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
-    # https://github.com/google/flax/issues/4091
-    kernel_init: nn.initializers.Initializer = jax.nn.initializers.truncated_normal(.02, lower=-2/.02, upper=2/.02)
-    bias_init: nn.initializers.Initializer = nn.initializers.zeros
+class WNConv1d(nn.Conv):
 
     @nn.compact
     def __call__(self, x):
+        # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
+        # https://github.com/google/flax/issues/4091
+        # Note: we are just ignoring whatever self.kernel_init and self.bias_init are.
+        kernel_init = jax.nn.initializers.truncated_normal(.02, lower=-2 / .02, upper=2 / .02)
+        bias_init = nn.initializers.zeros
+
         conv = nn.Conv(
             features=self.features,
             kernel_size=self.kernel_size,
@@ -106,8 +95,8 @@ class WNConv1d(nn.Module):
             dtype=self.dtype,
             param_dtype=self.param_dtype,
             precision=self.precision,
-            kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            kernel_init=kernel_init,
+            bias_init=bias_init
         )
         # MyWeightNorm initializes itself as if the conv had been initialized the way PyTorch would have instead
         # of what we did (truncated normal).

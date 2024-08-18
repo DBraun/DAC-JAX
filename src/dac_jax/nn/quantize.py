@@ -62,7 +62,7 @@ class VectorQuantize(nn.Module):
         self.out_proj = WNConv1d(features=self.input_dim, kernel_size=(1,))
         # PyTorch uses a normal distribution for weight initialization of Embeddings.
         self.codebook = nn.Embed(num_embeddings=self.codebook_size, features=self.codebook_dim,
-                                 embedding_init=nn.initializers.normal())
+                                 embedding_init=nn.initializers.normal(stddev=1))
 
     def __call__(self, z) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """Quantized the input tensor using a fixed codebook and returns the corresponding codebook vectors
