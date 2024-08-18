@@ -261,10 +261,8 @@ if __name__ == "__main__":
                         console_kwargs={"width": 400},
                         ))
 
-    variables = disc.init(jax.random.key(3), x)
-    params = variables['params']
+    results, variables = disc.init_with_output(jax.random.key(3), x)
 
-    results = disc.apply({'params': params}, x)
     for i, result in enumerate(results):
         print(f"disc{i}")
         for i, _r in enumerate(result):
