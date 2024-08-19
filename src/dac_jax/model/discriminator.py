@@ -7,7 +7,15 @@ import jax.numpy as jnp
 import jax.scipy.signal
 
 from dac_jax.audio_utils import stft
-from dac_jax.nn.layers import LeakyReLU
+
+
+class LeakyReLU(nn.Module):
+
+    negative_slope: float = .01
+
+    @nn.compact
+    def __call__(self, x):
+        return nn.leaky_relu(x, negative_slope=self.negative_slope)
 
 
 class CustomConv1d(nn.Conv):
@@ -82,12 +90,12 @@ class MPD(nn.Module):
     @nn.compact
     def __call__(self, x):
         convs = [
-            WNConv2d(features=32, kernel_size=(5, 1), strides=(3, 1), padding=(2, 0)),
-            WNConv2d(features=128, kernel_size=(5, 1), strides=(3, 1), padding=(2, 0)),
-            WNConv2d(features=512, kernel_size=(5, 1), strides=(3, 1), padding=(2, 0)),
-            WNConv2d(features=1024, kernel_size=(5, 1), strides=(3, 1), padding=(2, 0)),
-            WNConv2d(features=1024, kernel_size=(5, 1), strides=(1, 1), padding=(2, 0)),
-            WNConv2d(features=1, kernel_size=(3, 1), padding=(1, 0), act=False)
+            WNConv2d(features=32, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
+            WNConv2d(features=128, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
+            WNConv2d(features=512, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
+            WNConv2d(features=1024, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
+            WNConv2d(features=1024, kernel_size=(5, 1), strides=(1, 1), padding=((2, 2), (0, 0))),
+            WNConv2d(features=1, kernel_size=(3, 1), padding=((1, 1), (0, 0)), act=False)
         ]
 
         fmap = []

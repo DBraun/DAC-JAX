@@ -55,15 +55,6 @@ def convtranspose_to_output_length(s, d, k, L):
     return L
 
 
-class LeakyReLU(nn.Module):
-
-    negative_slope: float = .01
-
-    @nn.compact
-    def __call__(self, x):
-        return nn.leaky_relu(x, negative_slope=self.negative_slope)
-
-
 class WNConv1d(nn.Conv):
 
     @nn.compact
