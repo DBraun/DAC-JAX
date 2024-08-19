@@ -52,15 +52,19 @@ class CustomConv1d(nn.Conv):
         )(x)
 
 
-def disc_WNConv1d(*args, act=True, **kwargs):
-    conv = nn.WeightNorm(CustomConv1d(*args, **kwargs))
+def disc_WNConv1d(*args, act=True, kernel_size=(1,), **kwargs):
+    # https://github.com/google/flax/discussions/4131
+    scale_init = nn.initializers.constant(1/jnp.prod(jnp.array(kernel_size)))
+    conv = nn.WeightNorm(CustomConv1d(*args, kernel_size=kernel_size, **kwargs), scale_init=scale_init)
     if not act:
         return conv
     return nn.Sequential([conv, LeakyReLU(negative_slope=0.1)])
 
 
-def WNConv2d(*args, act=True, **kwargs):
-    conv = nn.WeightNorm(CustomConv1d(*args, **kwargs))
+def WNConv2d(*args, act=True, kernel_size=(1, 1), **kwargs):
+    # https://github.com/google/flax/discussions/4131
+    scale_init = nn.initializers.constant(1 / jnp.prod(jnp.array(kernel_size)))
+    conv = nn.WeightNorm(CustomConv1d(*args, kernel_size=kernel_size, **kwargs), scale_init=scale_init)
     if not act:
         return conv
     return nn.Sequential([conv, LeakyReLU(negative_slope=0.1)])

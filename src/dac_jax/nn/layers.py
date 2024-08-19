@@ -1,14 +1,6 @@
 import math
-from typing import Optional, Sequence, Union
-
 import flax.linen as nn
-from flax.typing import (
-  Array,
-  Dtype,
-  PrecisionLike,
-  PaddingLike,
-  Initializer,
-)
+
 import jax
 import jax.numpy as jnp
 
