@@ -23,7 +23,7 @@ map_variables = transforms.map_variables
 
 
 class WeightNorm(nn.Module):
-
+  mode: str  # "fan_in" or "fan_out"
   layer_instance: nn.Module
   epsilon: float = 1e-12
   dtype: Optional[Dtype] = None
@@ -74,9 +74,9 @@ class WeightNorm(nn.Module):
     """
     value = jnp.asarray(vs)
     str_path = (
-      self.layer_instance.name
-      + '/'
-      + '/'.join((dict_key.key for dict_key in path[1:]))
+            self.layer_instance.name
+            + '/'
+            + '/'.join((dict_key.key for dict_key in path[1:]))
     )
     if self.variable_filter:
       for variable_name in self.variable_filter:
@@ -103,15 +103,24 @@ class WeightNorm(nn.Module):
     value_bar = _l2_normalize(value, axis=reduction_axes, eps=self.epsilon)
 
     def scale_init(key, _shape, dtype):
-        # Initialize the weights of a Conv1d the way PyTorch would. Look at the "Variables" section and "weights".
-        # https://pytorch.org/docs/stable/generated/torch.nn.Conv1d.html
-        kernel_size = value.shape[0]
-        c_in = value.shape[1]
-        out_features = value.shape[2]
-        groups = 1
-        conv_weights = random.uniform(key, (kernel_size, c_in, out_features), dtype, -1) * jnp.sqrt(groups/(c_in*kernel_size))
-        scale = jnp.linalg.norm(conv_weights, axis=(0, 1))  # [out_features]
-        return scale
+      # Initialize the weights of a Conv1d the way PyTorch would. Look at the "Variables" section and "weights".
+      # https://pytorch.org/docs/stable/generated/torch.nn.Conv1d.html
+      *kernel_size, c_in, out_features = value.shape
+      if hasattr(self.layer_instance, "transpose_kernel") and self.layer_instance.transpose_kernel:
+        c_in, out_features = out_features, c_in
+      groups = self.layer_instance.feature_group_count if hasattr(self.layer_instance, "feature_group_count") else 1
+      if self.mode == "fan_in":
+        c = c_in
+      elif self.mode == "fan_out":
+        c = out_features
+      else:
+        raise ValueError(f"Unexpected mode: {self.mode}")
+
+      kernel = jnp.size(value[..., 0, 0])
+
+      conv_weights = random.uniform(key, (kernel, value.shape[-2], value.shape[-1]), dtype, -1) * jnp.sqrt(groups / (c * kernel))
+      scale = jnp.linalg.norm(conv_weights, axis=(0, 1))  # [out_features]
+      return scale
 
     args = [vs]
     if self.use_scale:
@@ -126,3 +135,4 @@ class WeightNorm(nn.Module):
 
     dtype = dtypes.canonicalize_dtype(*args, dtype=self.dtype)
     return jnp.asarray(value_bar, dtype)
+

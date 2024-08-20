@@ -83,7 +83,7 @@ class WNConv1d(nn.Conv):
         )
         # MyWeightNorm initializes itself as if the conv had been initialized the way PyTorch would have instead
         # of what we did (truncated normal).
-        block = MyWeightNorm(conv)
+        block = MyWeightNorm("fan_in", conv)
         x = block(x)
         return x
 
@@ -143,7 +143,7 @@ class WNConvTranspose1d(nn.ConvTranspose):
             bias_init=bias_init,
             transpose_kernel=True  # note: this helps us load weights from PyTorch
         )
-        block = nn.WeightNorm(conv)  # note: we use the epsilon default
+        block = MyWeightNorm("fan_out", conv)
         x = block(x)
         return x
 

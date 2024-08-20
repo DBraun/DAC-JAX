@@ -12,13 +12,12 @@ from dac.nn.loss import MelSpectrogramLoss, MultiScaleSTFTLoss
 from audiotools import AudioSignal
 
 
-@pytest.mark.parametrize("match_stride,hop_factor,length,use_scipy", product(
+@pytest.mark.parametrize("match_stride,hop_factor,length", product(
     [False, True],
     [0.25, 0.5],
     [44100, 44101],
-    [False, True],
 ))
-def test_mel_same_as_audiotools(match_stride: bool, hop_factor: float, length: int, use_scipy: bool):
+def test_mel_same_as_audiotools(match_stride: bool, hop_factor: float, length: int):
 
     if hop_factor == 0.5 and match_stride:
         return  # for some reason DAC torch disallows this

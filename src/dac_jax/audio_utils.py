@@ -94,6 +94,10 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
 
     x = rearrange(x, 'b c t -> (b c) t')
 
+    if window == 'sqrt_hann':
+        from scipy import signal as scipy_signal
+        window = jnp.sqrt(scipy_signal.get_window("hann", frame_length))
+
     # todo: https://github.com/google-deepmind/dm_aux/issues/2
     stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window,
                                   pad_mode=padding_type, pad=aux.spectral.Pad.BOTH)
