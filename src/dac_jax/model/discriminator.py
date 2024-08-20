@@ -19,9 +19,15 @@ class LeakyReLU(nn.Module):
         return nn.leaky_relu(x, negative_slope=self.negative_slope)
 
 
-def make_initializer(out_channels, in_channels, kernel_size, groups):
+def make_initializer(in_channels, out_channels, kernel_size, groups, mode="fan_in"):
     # https://pytorch.org/docs/stable/generated/torch.nn.Conv1d.html
-    k = groups / (in_channels * jnp.prod(jnp.array(kernel_size)))
+    if mode == "fan_in":
+        c = in_channels
+    elif mode == "fan_out":
+        c = out_channels
+    else:
+        raise ValueError(f"Unexpected mode: {mode}")
+    k = groups / (c * jnp.prod(jnp.array(kernel_size)))
     scale = jnp.sqrt(k)
     return lambda key, shape, dtype: jax.random.uniform(key, shape, minval=-scale, maxval=scale, dtype=dtype)
 
@@ -34,13 +40,13 @@ class WNConv(nn.Conv):
     def __call__(self, x):
 
         kernel_init = make_initializer(
-            self.features, x.shape[-1], self.kernel_size, self.feature_group_count
+            x.shape[-1], self.features, self.kernel_size, self.feature_group_count
         )
 
         if self.use_bias:
             # note: we just ignore whatever self.bias_init is
             bias_init = make_initializer(
-                self.features, x.shape[-1], self.kernel_size, self.feature_group_count
+                x.shape[-1], self.features, self.kernel_size, self.feature_group_count
             )
         else:
             bias_init = None
@@ -61,8 +67,7 @@ class WNConv(nn.Conv):
             kernel_init=kernel_init,
             bias_init=bias_init
         )
-        block = MyWeightNorm("fan_in", conv)
-        x = block(x)
+        x = MyWeightNorm("fan_in", conv)(x)
 
         if self.act:
             x = LeakyReLU(.1)(x)
