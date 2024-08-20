@@ -3,8 +3,8 @@ from dataclasses import field
 from audiotree.resample import resample
 from einops import rearrange
 import flax.linen as nn
-import jax.numpy as jnp
-import jax.scipy.signal
+import jax
+from jax import numpy as jnp
 
 from dac_jax.audio_utils import stft
 from dac_jax.nn.weight_norm import WeightNorm as MyWeightNorm
