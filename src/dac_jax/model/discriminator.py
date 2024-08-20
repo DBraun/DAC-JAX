@@ -7,7 +7,6 @@ import jax
 from jax import numpy as jnp
 
 from dac_jax.audio_utils import stft
-from dac_jax.nn.weight_norm import WeightNorm as MyWeightNorm
 from dac_jax.nn.layers import make_initializer
 
 
@@ -55,7 +54,9 @@ class WNConv(nn.Conv):
             kernel_init=kernel_init,
             bias_init=bias_init
         )
-        x = MyWeightNorm("fan_in", conv)(x)
+        scale_init = nn.initializers.constant(1 / jnp.sqrt(3))
+        block = nn.WeightNorm(conv, scale_init=scale_init)
+        x = block(x)
 
         if self.act:
             x = LeakyReLU(.1)(x)

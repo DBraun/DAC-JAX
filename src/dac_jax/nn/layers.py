@@ -4,8 +4,6 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
-from .weight_norm import WeightNorm as MyWeightNorm
-
 
 def default_stride(strides):
     if strides is None:
@@ -94,9 +92,8 @@ class WNConv1d(nn.Conv):
             kernel_init=kernel_init,
             bias_init=bias_init
         )
-        # MyWeightNorm initializes itself as if the conv had been initialized the way PyTorch would have instead
-        # of what we did (truncated normal).
-        block = MyWeightNorm("fan_in", conv)
+        scale_init = nn.initializers.constant(1/jnp.sqrt(3))
+        block = nn.WeightNorm(conv, scale_init=scale_init)
         x = block(x)
         return x
 
@@ -149,7 +146,8 @@ class WNConvTranspose1d(nn.ConvTranspose):
             bias_init=bias_init,
             transpose_kernel=True  # note: this helps us load weights from PyTorch
         )
-        block = MyWeightNorm("fan_out", conv)
+        scale_init = nn.initializers.constant(1 / jnp.sqrt(3))
+        block = nn.WeightNorm(conv, scale_init=scale_init)
         x = block(x)
         return x
 

@@ -218,8 +218,8 @@ class ResidualVectorQuantize(nn.Module):
         latents = jnp.concatenate(latents, axis=2)
 
         # normalize based on number of codebooks
-        commitment_loss = commitment_loss / self.n_codebooks
-        codebook_loss = codebook_loss / self.n_codebooks
+        # commitment_loss = commitment_loss / self.n_codebooks
+        # codebook_loss = codebook_loss / self.n_codebooks
 
         return z_q, codes, latents, commitment_loss, codebook_loss
 

@@ -108,14 +108,14 @@ def discriminator_loss(fake, real):
     Computes a discriminator loss, given the outputs of the discriminator
     used on a fake input and a real input.
     """
-    d_fake, d_real = jax.lax.stop_gradient(fake), real
+    d_fake, d_real = fake, real
 
     loss_d = 0
     for x_fake, x_real in zip(d_fake, d_real):
         loss_d = loss_d + jnp.square(x_fake[-1]).mean()
         loss_d = loss_d + jnp.square(1 - x_real[-1]).mean()
     # We normalize based on the number of feature maps, but the original DAC doesn't do this.
-    loss_d = loss_d / len(d_fake)
+    # loss_d = loss_d / len(d_fake)
     return loss_d
 
 
@@ -131,7 +131,7 @@ def generator_loss(fake, real):
         loss_g = loss_g + jnp.square(1 - x_fake[-1]).mean()
 
     # We normalize based on the number of feature maps, but the original DAC doesn't do this.
-    loss_g = loss_g / len(d_fake)
+    # loss_g = loss_g / len(d_fake)
 
     loss_feature = 0
 
@@ -140,7 +140,7 @@ def generator_loss(fake, real):
             loss_feature = loss_feature + l1_loss(d_fake[i][j], d_real[i][j])
 
     # We normalize based on the number of feature maps, but the original DAC doesn't do this.
-    loss_feature = loss_feature / sum([len(d_fake[i])-1 for i in range(len(d_fake))])
+    # loss_feature = loss_feature / sum([len(d_fake[i])-1 for i in range(len(d_fake))])
 
     return loss_g, loss_feature
 
