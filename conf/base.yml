@@ -33,12 +33,12 @@ create_discriminator_schedule.lr_gamma: 0.999996
 # Optimization
 create_generator_optimizer.adam_b1: 0.8
 create_generator_optimizer.adam_b2: 0.99
-create_generator_optimizer.weight_decay: .01
+create_generator_optimizer.adam_weight_decay: .01
 create_generator_optimizer.grad_clip: 1e3
 
 create_discriminator_optimizer.adam_b1: 0.8
 create_discriminator_optimizer.adam_b2: 0.99
-create_discriminator_optimizer.weight_decay: .01
+create_discriminator_optimizer.adam_weight_decay: .01
 create_discriminator_optimizer.grad_clip: 10
 
 lambdas:
