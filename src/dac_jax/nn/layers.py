@@ -55,6 +55,19 @@ def convtranspose_to_output_length(s, d, k, L):
     return L
 
 
+def make_initializer(in_channels, out_channels, kernel_size, groups, mode="fan_in"):
+    # https://pytorch.org/docs/stable/generated/torch.nn.Conv1d.html
+    if mode == "fan_in":
+        c = in_channels
+    elif mode == "fan_out":
+        c = out_channels
+    else:
+        raise ValueError(f"Unexpected mode: {mode}")
+    k = groups / (c * jnp.prod(jnp.array(kernel_size)))
+    scale = jnp.sqrt(k)
+    return lambda key, shape, dtype: jax.random.uniform(key, shape, minval=-scale, maxval=scale, dtype=dtype)
+
+
 class WNConv1d(nn.Conv):
 
     @nn.compact
@@ -104,26 +117,19 @@ class WNConv1d(nn.Conv):
 
 class WNConvTranspose1d(nn.ConvTranspose):
 
-    @staticmethod
-    def make_initializer(out_channels, in_channels, kernel_size, groups):
-        # https://pytorch.org/docs/stable/generated/torch.nn.ConvTranspose1d.html
-        k = groups / (out_channels * jnp.prod(jnp.array(kernel_size)))
-        scale = jnp.sqrt(k)
-        return lambda key, shape, dtype: jax.random.uniform(key, shape, minval=-scale, maxval=scale, dtype=dtype)
-
     @nn.compact
     def __call__(self, x):
 
         groups = 1
         # note: we just ignore whatever self.kernel_init is
-        kernel_init = self.make_initializer(
-            self.features, x.shape[-1], self.kernel_size, groups
+        kernel_init = make_initializer(
+            x.shape[-1], self.features, self.kernel_size, groups, mode="fan_out",
         )
 
         if self.use_bias:
             # note: we just ignore whatever self.bias_init is
-            bias_init = self.make_initializer(
-                self.features, x.shape[-1], self.kernel_size, groups
+            bias_init = make_initializer(
+                x.shape[-1], self.features, self.kernel_size, groups, mode="fan_out",
             )
         else:
             bias_init = None
