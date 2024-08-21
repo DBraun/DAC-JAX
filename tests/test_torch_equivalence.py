@@ -79,8 +79,8 @@ def _jax_padding(np_data) -> dict[np.array]:
     y['latents'] = y['latents'].transpose(0, 2, 1)
 
     # Multiply by model.n_codebooks since we normalize by n_codebooks and torch doesn't.
-    y['vq/commitment_loss'] = y['vq/commitment_loss']#*model.n_codebooks
-    y['vq/codebook_loss'] = y['vq/codebook_loss']#*model.n_codebooks
+    y['vq/commitment_loss'] = y['vq/commitment_loss']*model.n_codebooks
+    y['vq/codebook_loss'] = y['vq/codebook_loss']*model.n_codebooks
 
     y = jax.tree.map(lambda x: np.array(x), y)
     return y

@@ -31,9 +31,6 @@ eval "$(conda shell.bash hook)"
 conda activate ../Terrapin/.env/jax-env
 export PYTHONPATH=$PWD
 
-export DAC_JAX_CACHE=/n/fs/audiovis/$USER/DAC-JAX/model_cache
-python -m dac_jax download_model --model_type=44khz --model_bitrate=8kbps
-
 ## prepare data
 echo Copying data to /scratch
 mkdir -p /scratch/$USER/datasets/nsynth
