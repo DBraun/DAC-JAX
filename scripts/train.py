@@ -26,6 +26,7 @@ from typing import List, Mapping, Tuple
 import warnings
 
 import jax
+
 jax.config.update("jax_threefry_partitionable", True)
 assert jax.config.jax_threefry_partitionable is True
 assert jax.config.jax_default_prng_impl == "threefry2x32"
@@ -319,15 +320,23 @@ def eval_step(
 
 
 def train_step_discriminator(
-    rng: jax.Array, generator: TrainState, discriminator: TrainState, audio_data: jnp.ndarray, sample_rate
+    rng: jax.Array,
+    generator: TrainState,
+    discriminator: TrainState,
+    audio_data: jnp.ndarray,
+    sample_rate,
 ) -> Tuple[Discriminator, struct.PyTreeNode]:
 
     def loss_fn(params):
         # note: you could calculate with the ``generator`` again, since its weights were just updated,
         # but we prefer not to in order to run faster.
-        output = generator.apply_fn({'params': generator.params}, audio_data, sample_rate,
-                                      rngs={"rng_stream": rng}, train=True  # todo: maybe pick Train=False even though DAC didn't
-                                    )
+        output = generator.apply_fn(
+            {"params": generator.params},
+            audio_data,
+            sample_rate,
+            rngs={"rng_stream": rng},
+            train=True,  # todo: maybe pick Train=False even though DAC didn't
+        )
         recons = output["audio"]
 
         fake = discriminator.apply_fn({"params": params}, jax.lax.stop_gradient(recons))
@@ -404,7 +413,9 @@ def train_step(
         subkey, generator, discriminator, audio_data, sample_rate
     )
     key, subkey = random.split(key)
-    discriminator, loss = train_step_discriminator(subkey, generator, discriminator, audio_data, sample_rate)
+    discriminator, loss = train_step_discriminator(
+        subkey, generator, discriminator, audio_data, sample_rate
+    )
 
     output["adv/disc_loss"] = loss
     output["lr/generator"] = create_generator_schedule()(step)
