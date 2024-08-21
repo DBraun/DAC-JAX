@@ -21,23 +21,28 @@ from jax.sharding import NamedSharding, Mesh, PartitionSpec as P
 
 # Transforms
 def filter_fn(fn):
-    return hasattr(fn, 'random_map') or hasattr(fn, 'map') or hasattr(fn, 'np_random_map')
+    return (
+        hasattr(fn, "random_map") or hasattr(fn, "map") or hasattr(fn, "np_random_map")
+    )
 
 
 # https://github.com/pseeth/argbind/tree/main/examples/bind_module
-transforms_lib = argbind.bind_module(transforms_lib, 'train', 'val', filter_fn=filter_fn)
+transforms_lib = argbind.bind_module(
+    transforms_lib, "train", "val", filter_fn=filter_fn
+)
 
-SaliencyParams = argbind.bind(SaliencyParams, 'train', 'val', 'test', 'sample')
+SaliencyParams = argbind.bind(SaliencyParams, "train", "val", "test", "sample")
 
 
-@argbind.bind('train', 'val', 'test', 'sample')
+@argbind.bind("train", "val", "test", "sample")
 def build_transforms(
-        augment: list[str] = None,
+    augment: list[str] = None,
 ):
     """
     :param augment: A list of str names of Transforms (from ``audiotree.transforms``) such as VolumeNorm
     :return: a list of instances of the Transforms.
     """
+
     def to_transform_instances(transform_classes):
         instances = []
         for TransformClass in transform_classes:
@@ -71,7 +76,9 @@ def make_iterator(
         in_specs=(P(None), P("data")),
         out_specs=P("data"),
     )
-    @partial(jax.vmap, in_axes=(0, None), out_axes=0)  # vmap over just `key`.  # todo: set `out_axes=None`
+    @partial(
+        jax.vmap, in_axes=(0, None), out_axes=0
+    )  # vmap over just `key`.  # todo: set `out_axes=None`
     def main_transform(key: jax.Array, batch):
         for transform in operations:
             if isinstance(transform, grain.RandomMapTransform):
@@ -238,7 +245,7 @@ def create_dataset(
     return batched_dataloader
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     from tqdm import tqdm
     from audiotree.transforms import VolumeNorm, RescaleAudio, SwapStereo, InvertPhase
@@ -246,12 +253,12 @@ if __name__ == '__main__':
 
     logging.set_verbosity(logging.INFO)
 
-    folder1 = '/mnt/c/users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Bass-Bass3-bass-10-syx-01-SUPERBASS2-note69'
-    folder2 = '/mnt/c/Users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Accordion-ACCORD01-SYX-06-AKKORDEON-note69'
+    folder1 = "/mnt/c/users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Bass-Bass3-bass-10-syx-01-SUPERBASS2-note69"
+    folder2 = "/mnt/c/Users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Accordion-ACCORD01-SYX-06-AKKORDEON-note69"
 
     sources = {
-        'a': [folder1],
-        'b': [folder2],
+        "a": [folder1],
+        "b": [folder2],
     }
 
     num_steps = 1000
@@ -277,5 +284,5 @@ if __name__ == '__main__':
         saliency_params=SaliencyParams(False, 8, -70),
     )
 
-    for x in tqdm(ds, total=num_steps, desc='Grain Dataset'):
+    for x in tqdm(ds, total=num_steps, desc="Grain Dataset"):
         pass
