@@ -66,15 +66,15 @@ def make_iterator(
     devices = mesh_utils.create_device_mesh((n_gpus,))
 
     # replicate initial params on all devices, shard data batch over devices
-    mesh = Mesh(devices, ("data",))
-    named_sharding = NamedSharding(mesh, P("data"))
+    mesh = Mesh(devices, ("ensemble",))
+    named_sharding = NamedSharding(mesh, P("ensemble"))
 
     @jax.jit
     @partial(
         shard_map,
         mesh=mesh,
-        in_specs=(P(None), P("data")),
-        out_specs=P("data"),
+        in_specs=(P(None), P("ensemble")),
+        out_specs=P("ensemble"),
     )
     @partial(
         jax.vmap, in_axes=(0, None), out_axes=0

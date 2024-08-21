@@ -33,7 +33,7 @@ assert jax.config.jax_default_prng_impl == "threefry2x32"
 from jax import numpy as jnp
 from jax import random
 from jax.experimental import mesh_utils
-from jax.sharding import NamedSharding, Mesh, PartitionSpec
+from jax.sharding import NamedSharding, Mesh, PartitionSpec as P
 
 from absl import logging
 import argbind
@@ -41,7 +41,6 @@ from audiotree import AudioTree
 from clu import metric_writers, periodic_actions
 from clu.metrics import Average, Collection
 from einops import rearrange
-from flax import linen as nn
 from flax import struct
 from flax.training import common_utils
 from flax.training.early_stopping import EarlyStopping
@@ -79,9 +78,9 @@ EarlyStopping = argbind.bind(EarlyStopping)
 n_gpus = jax.device_count()
 devices = mesh_utils.create_device_mesh((n_gpus,))
 
-mesh = Mesh(devices, ("data",))
-data_sharding = NamedSharding(mesh, PartitionSpec("data"))
-replicated_sharding = NamedSharding(mesh, PartitionSpec())
+mesh = Mesh(devices, ("ensemble",))
+data_sharding = NamedSharding(mesh, P("ensemble"))
+replicated_sharding = NamedSharding(mesh, P())
 
 
 @argbind.bind()
@@ -175,12 +174,13 @@ def create_generator_optimizer(
 def create_generator(
     key: jax.Array,
     batch: AudioTree,
-    model: DAC,
     optimizer: optax.GradientTransformation,
     tabulate=False,
 ) -> TrainState:
 
     subkey1, subkey2, key = random.split(key, 3)
+
+    model = DAC()
 
     load_weights = False  # todo: if you're curious about a pre-trained model
     if load_weights:
@@ -206,6 +206,7 @@ def create_generator(
         )
 
     state = TrainState.create(apply_fn=model.apply, params=params, tx=optimizer)
+    state = jax.device_put(state, replicated_sharding)
     return state
 
 
@@ -246,10 +247,11 @@ def create_discriminator_optimizer(
 def create_discriminator(
     key: jax.Array,
     batch: AudioTree,
-    model: Discriminator,
     optimizer: optax.GradientTransformation,
     tabulate=False,
 ) -> TrainState:
+
+    model = Discriminator()
 
     key, subkey = random.split(key)
     params = model.init(subkey, batch.audio_data)["params"]
@@ -269,9 +271,14 @@ def create_discriminator(
         )
 
     state = TrainState.create(apply_fn=model.apply, params=params, tx=optimizer)
+    state = jax.device_put(state, replicated_sharding)
     return state
 
 
+@partial(
+    jax.jit,
+    static_argnums=4,
+)
 @argbind.bind(without_prefix=True)  # use argbind for lambdas
 def eval_step(
     rng: jax.Array,
@@ -395,6 +402,7 @@ def train_step_generator(
     return generator, output
 
 
+@partial(jax.jit, donate_argnums=(1, 2), static_argnums=5)
 def train_step(
     key: jax.Array,
     generator: TrainState,
@@ -528,6 +536,7 @@ def train(
 
     print(f"devices: {jax.devices()}")
 
+    local_batch_size = batch_size
     n_gpus = jax.device_count()
     batch_size *= n_gpus
     val_batch_size *= n_gpus
@@ -582,33 +591,6 @@ def train(
     logging.info("Getting first training batch...")
     batch = next(train_iter)
 
-    generator_optimizer = create_generator_optimizer()
-    discriminator_optimizer = create_discriminator_optimizer()
-
-    generator = DAC()
-    discriminator = Discriminator()
-
-    generator_state_sharding = nn.get_sharding(
-        jax.eval_shape(
-            partial(create_generator, model=generator, optimizer=generator_optimizer),
-            random.key(0),
-            batch,
-        ),
-        mesh,
-    )
-    discriminator_state_sharding = nn.get_sharding(
-        jax.eval_shape(
-            partial(
-                create_discriminator,
-                model=discriminator,
-                optimizer=discriminator_optimizer,
-            ),
-            random.key(0),
-            batch,
-        ),
-        mesh,
-    )
-
     if restore:
         latest_ckpt = checkpoint_manager.latest()
         logger.info(f"Restoring latest checkpoint v{latest_ckpt}.")
@@ -616,36 +598,33 @@ def train(
         state = restored.state
         generator_state = state["generator"]
         discriminator_state = state["discriminator"]
+        generator_state = jax.device_put(generator_state, replicated_sharding)
+        discriminator_state = jax.device_put(discriminator_state, replicated_sharding)
     else:
         tabulate = bool(tabulate)
 
         key = random.key(seed)
         key, subkey = random.split(key)
 
+        local_batch = jax.tree.map(lambda x: x[:local_batch_size], batch)
+
         logging.info("Creating generator state.")
-        generator_state: TrainState = jax.jit(
-            partial(
-                create_generator,
-                model=generator,
-                optimizer=generator_optimizer,
-                tabulate=tabulate,
-            ),
-            in_shardings=(replicated_sharding, data_sharding),
-            out_shardings=generator_state_sharding,
-        )(subkey, batch)
+        generator_state = create_generator(
+            subkey,
+            local_batch,
+            optimizer=create_generator_optimizer(),
+            tabulate=tabulate,
+        )
 
         logging.info("Creating discriminator state.")
         key, subkey = random.split(key)
-        discriminator_state: TrainState = jax.jit(
-            partial(
-                create_discriminator,
-                model=discriminator,
-                optimizer=discriminator_optimizer,
-                tabulate=tabulate,
-            ),
-            in_shardings=(replicated_sharding, data_sharding),
-            out_shardings=discriminator_state_sharding,
-        )(subkey, batch)
+        discriminator_state = create_discriminator(
+            subkey,
+            local_batch,
+            optimizer=create_discriminator_optimizer(),
+            tabulate=tabulate,
+        )
+
         save_checkpoint(
             checkpoint_manager,
             generator_state,
@@ -677,32 +656,6 @@ def train(
 
     train_metrics_all = []
 
-    jit_train_step = jax.jit(
-        train_step,
-        in_shardings=(
-            None,
-            generator_state_sharding,
-            discriminator_state_sharding,
-            data_sharding,
-            None,
-        ),
-        out_shardings=None,
-        donate_argnums=(1, 2),
-        static_argnums=5,
-    )
-
-    jit_eval_step = jax.jit(
-        eval_step,
-        in_shardings=(
-            None,
-            generator_state_sharding,
-            discriminator_state_sharding,
-            data_sharding,
-        ),
-        out_shardings=None,
-        static_argnums=4,
-    )
-
     with metric_writers.ensure_flushes(writer):
         for step in range(1, num_iterations + 1):
 
@@ -714,7 +667,7 @@ def train(
                 if step == 1:
                     logging.info("Calling first `train_step`.")
                 key, subkey = random.split(key)
-                generator_state, discriminator_state, train_metrics = jit_train_step(
+                generator_state, discriminator_state, train_metrics = train_step(
                     subkey,
                     generator_state,
                     discriminator_state,
@@ -770,7 +723,7 @@ def train(
                     for test_batch in eval_iter:
                         ran_once = True
                         key, subkey = random.split(key)
-                        eval_metrics = jit_eval_step(
+                        eval_metrics = eval_step(
                             subkey,
                             generator_state,
                             discriminator_state,
