@@ -13,7 +13,7 @@
 
 function cleanup() {
     echo 'Running cleanup script'
-##    kill $TRAIN_PID
+    kill $TRAIN_PID
     kill $TB_PID
     mv "/scratch/$USER/runs/slurm_$SLURM_JOB_ID" "/n/fs/audiovis/$USER/DAC-JAX/runs"
     rm -rf "/scratch/$USER"
@@ -43,7 +43,7 @@ tensorboard --logdir="/scratch/$USER/runs" --port=10013 --samples_per_plugin aud
 python scripts/train.py \
   --args.load conf/neuronic.yml \
   --train.name="slurm_$SLURM_JOB_ID" \
-  --train.ckpt_dir="/scratch/$USER/runs"
-##  & TRAIN_PID=$!
+  --train.ckpt_dir="/scratch/$USER/runs" \
+  & TRAIN_PID=$!
 
-##wait $TRAIN_PID
+wait $TRAIN_PID
