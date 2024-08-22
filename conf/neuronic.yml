@@ -9,7 +9,7 @@ train.sample_freq: 500
 train.ckpt_max_keep: 1
 train.tabulate: 0
 
-create_dataset.worker_count: 4
+create_dataset.worker_count: 0
 SaliencyParams.search_function: SaliencyParams.search_bias_early
 
 EarlyStopping.patience: 10

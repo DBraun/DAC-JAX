@@ -2,8 +2,8 @@
 #SBATCH --job-name=DAC-JAX       # create a short name for your job
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks=1               # total number of tasks across all nodes
-#SBATCH --cpus-per-task=16       # cpu-cores per task (>1 if multi-threaded tasks)
-#SBATCH --mem-per-cpu=4G         # RAM usage per cpu-core
+#SBATCH --cpus-per-task=4        # cpu-cores per task (>1 if multi-threaded tasks)
+#SBATCH --mem-per-cpu=12G        # RAM usage per cpu-core
 #SBATCH --gres=gpu:2             # number of gpus per node
 #SBATCH --time=01:00:00          # total run time limit (HH:MM:SS)
 #SBATCH --signal=B:USR1@120      # 120 sec grace period for cleanup after timeout
