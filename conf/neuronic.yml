@@ -4,31 +4,32 @@ $include:
 train.batch_size: 4
 train.val_batch_size: 4
 train.sample_batch_size: 1
-train.valid_freq: 3000
-train.sample_freq: 500
+train.valid_freq: 4000
+train.sample_freq: 4000
 train.ckpt_max_keep: 1
 train.tabulate: 0
 
-create_dataset.worker_count: 0
-SaliencyParams.search_function: SaliencyParams.search_bias_early
-
 EarlyStopping.patience: 10
 
+SaliencyParams.search_function: SaliencyParams.search_bias_early
+
 # Data
+create_dataset.worker_count: 0
+
 train/create_dataset.sources:
   nsynth:
-    - /scratch/$USER/datasets/nsynth/nsynth-test/audio
+    - /scratch/$USER/datasets/nsynth/nsynth-train/audio
 
 val/create_dataset.num_steps: 100
 val/create_dataset.duration: 2
 val/create_dataset.sources:
   nsynth:
-    - /scratch/$USER/datasets/nsynth/nsynth-test/audio
+    - /scratch/$USER/datasets/nsynth/nsynth-valid/audio
 
 sample/create_dataset.duration: 2
 sample/create_dataset.sources:
   nsynth:
-    - /scratch/$USER/datasets/nsynth/nsynth-test/audio
+    - /scratch/$USER/datasets/nsynth/nsynth-valid/audio
 
 test/create_dataset.duration: 4
 test/create_dataset.sources:

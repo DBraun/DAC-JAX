@@ -2,10 +2,10 @@
 #SBATCH --job-name=DAC-JAX       # create a short name for your job
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks=1               # total number of tasks across all nodes
-#SBATCH --cpus-per-task=4        # cpu-cores per task (>1 if multi-threaded tasks)
-#SBATCH --mem-per-cpu=8G         # RAM usage per cpu-core
+#SBATCH --cpus-per-task=2        # cpu-cores per task (>1 if multi-threaded tasks)
+#SBATCH --mem-per-cpu=16G        # RAM usage per cpu-core
 #SBATCH --gres=gpu:2             # number of gpus per node
-#SBATCH --time=01:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --time=60:00:00          # total run time limit (HH:MM:SS)
 #SBATCH --signal=B:USR1@120      # 120 sec grace period for cleanup after timeout
 #SBATCH --signal=B:SIGTERM@120   # 120 sec grace period for cleanup after scancel is sent
 #SBATCH --mail-type=END          # choice could be 'fail'
@@ -33,8 +33,10 @@ export PYTHONPATH=$PWD
 
 ## prepare data
 echo Copying data to /scratch
-mkdir -p "/scratch/$USER/datasets/nsynth/nsynth-test"
-rsync -a --info=progress2 --no-i-r "/n/fs/audiovis/$USER/datasets/nsynth/nsynth-test" "/scratch/$USER/datasets/nsynth"
+##mkdir -p "/scratch/$USER/datasets/nsynth/nsynth-valid"
+##rsync -a --info=progress2 --no-i-r "/n/fs/audiovis/$USER/datasets/nsynth/nsynth-valid" "/scratch/$USER/datasets/nsynth"
+mkdir -p "/scratch/$USER/datasets"
+rsync -a --info=progress2 --no-i-r "/n/fs/audiovis/$USER/datasets/nsynth" "/scratch/$USER/datasets"
 echo Copied data to /scratch
 
 ## Launch TensorBoard and get the process ID of TensorBoard
