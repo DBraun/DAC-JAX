@@ -34,7 +34,8 @@ export PYTHONPATH=$PWD
 ## prepare data
 echo Copying data to /scratch
 mkdir -p /scratch/$USER/datasets/nsynth/nsynth-test
-rsync -avH --progress /n/fs/audiovis/$USER/datasets/nsynth/nsynth-test /scratch/$USER/datasets/nsynth/nsynth-test
+## rsync -avH --progress /n/fs/audiovis/$USER/datasets/nsynth/nsynth-test /scratch/$USER/datasets/nsynth
+rsync -a --info=progress2 --no-i-r /n/fs/audiovis/$USER/datasets/nsynth/nsynth-test /scratch/$USER/datasets/nsynth
 echo Copied data to /scratch
 
 ## Launch TensorBoard and get the process ID of TensorBoard
