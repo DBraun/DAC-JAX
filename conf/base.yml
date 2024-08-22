@@ -100,10 +100,11 @@ sample/build_transforms.augment:
   - RescaleAudio
 
 # Data
-# See salient_excerpt in Descript AudioTools.
-train/SaliencyParams.enabled: 1
-train/SaliencyParams.num_tries: 8
-train/SaliencyParams.loudness_cutoff: -40
+# This should be equivalent to how DAC used salient_excerpt from AudioTools.
+SaliencyParams.enabled: 1
+SaliencyParams.num_tries: 8
+SaliencyParams.loudness_cutoff: -40
+SaliencyParams.search_function: SaliencyParams.search_uniform
 
 # Data
 create_dataset.extensions:

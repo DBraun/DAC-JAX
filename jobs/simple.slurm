@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=MusicGen      # create a short name for your job
+#SBATCH --job-name=DAC-JAX       # create a short name for your job
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks=1               # total number of tasks across all nodes
-#SBATCH --cpus-per-task=4        # cpu-cores per task (>1 if multi-threaded tasks)
+#SBATCH --cpus-per-task=8        # cpu-cores per task (>1 if multi-threaded tasks)
 #SBATCH --mem-per-cpu=4G         # RAM usage per cpu-core
 #SBATCH --gres=gpu:2             # number of gpus per node
-#SBATCH --time=96:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --time=01:00:00          # total run time limit (HH:MM:SS)
 #SBATCH --signal=B:USR1@120      # 120 sec grace period for cleanup after timeout
 #SBATCH --signal=B:SIGTERM@120   # 120 sec grace period for cleanup after scancel is sent
 #SBATCH --mail-type=END          # choice could be 'fail'
@@ -33,18 +33,15 @@ export PYTHONPATH=$PWD
 
 ## prepare data
 echo Copying data to /scratch
-mkdir -p /scratch/$USER/datasets/nsynth
-rsync -avH --progress /n/fs/audiovis/$USER/datasets/nsynth /scratch/$USER/datasets
+mkdir -p /scratch/$USER/datasets/nsynth/nsynth-test
+rsync -avH --progress /n/fs/audiovis/$USER/datasets/nsynth/nsynth-test /scratch/$USER/datasets/nsynth/nsynth-test
 echo Copied data to /scratch
 
 ## Launch TensorBoard and get the process ID of TensorBoard
 tensorboard --logdir=/scratch/$USER/runs --port=10013 --samples_per_plugin audio=20 --bind_all & TB_PID=$!
 
-python train_simple.py \
-  --args.load conf/final/44khz.yml \
-  --train.batch_size=12 \
-  --train.val_batch_size=12 \
-  --create_dataset.worker_count=2 \
+python scripts/train.py \
+  --args.load conf/neuronic.yml \
   --train.name=slurm_$SLURM_JOB_ID \
   --train.ckpt_dir=/scratch/$USER/runs \
   & TRAIN_PID=$!

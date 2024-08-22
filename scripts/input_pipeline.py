@@ -4,8 +4,8 @@ from typing import List, Mapping
 
 import argbind
 from audiotree import transforms as transforms_lib
+from audiotree import SaliencyParams
 from audiotree.datasources import (
-    SaliencyParams,
     AudioDataSimpleSource,
     AudioDataBalancedSource,
 )

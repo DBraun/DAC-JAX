@@ -553,6 +553,9 @@ def train(
         logdir=workdir, just_logging=not is_process_main()
     )
 
+    if is_process_main():
+        argbind.dump_args(args, os.path.join(workdir, "argbind_args.yml"))
+
     if os.path.exists(orbax_dir):
         logger.info(f"Deleting existing orbax directory: {orbax_dir}")
         shutil.rmtree(orbax_dir)  # Remove any existing checkpoints from the last run.
