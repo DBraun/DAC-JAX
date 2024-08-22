@@ -3,6 +3,7 @@ from typing import List
 import argbind
 import jax
 from jax import random
+
 from dac_jax import load_model
 
 
@@ -49,3 +50,42 @@ if __name__ == "__main__":
     args = argbind.parse_args()
     with argbind.scope(args):
         benchmark_dac()
+
+
+# @argbind.bind(without_prefix=True)
+# def benchmark_dac_encode(model_type="44khz", model_bitrate='8kbps', batch_size: int = 1, durations: List[str] = None):
+#
+#     if durations is None:
+#         durations = [1, 2, 4, 8, 16, 32]
+#     else:
+#         durations = [float(x) for x in durations]
+#
+#     model, variables = load_model(model_type=model_type, model_bitrate=model_bitrate)
+#
+#     @jax.jit
+#     def encode(audio):
+#         audio = model.apply(variables, audio, model.sample_rate, method="preprocess")
+#         _, codes, _, _, _ = model.apply(variables, audio, train=False, method="encode")
+#         return codes
+#
+#     for duration in durations:
+#         print(f'Benchmarking encode for model: {model_type}, {model_bitrate} with duration {duration} sec and batch size {batch_size}.')
+#
+#         T = int(duration * model.sample_rate)
+#         x = random.normal(random.key(0), shape=(batch_size, 1, T))
+#         import tqdm
+#         for _ in tqdm.trange(100):
+#             try:
+#                 encode(x)
+#             except Exception as e:
+#                 print(f'Exception for duration "{duration}": {e}')
+
+
+# if __name__ == "__main__":
+#     # example usage:
+#     # python3 benchmark.py --model_type=44khz --durations="5" --batch_size=8
+#     print(f'devices: {jax.devices()}')
+#
+#     args = argbind.parse_args()
+#     with argbind.scope(args):
+#         benchmark_dac_encode()

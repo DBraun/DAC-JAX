@@ -108,7 +108,7 @@ def discriminator_loss(fake, real):
     Computes a discriminator loss, given the outputs of the discriminator
     used on a fake input and a real input.
     """
-    d_fake, d_real = jax.lax.stop_gradient(fake), real
+    d_fake, d_real = fake, real
 
     loss_d = 0
     for x_fake, x_real in zip(d_fake, d_real):

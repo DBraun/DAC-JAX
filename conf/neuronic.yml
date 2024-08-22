@@ -1,0 +1,36 @@
+$include:
+  - conf/final/44khz.yml
+
+train.batch_size: 8
+train.val_batch_size: 8
+train.sample_batch_size: 2
+train.valid_freq: 2000
+train.sample_freq: 500
+train.ckpt_max_keep: 1
+train.tabulate: 0
+
+create_dataset.worker_count: 4
+SaliencyParams.search_function: SaliencyParams.search_bias_early
+
+EarlyStopping.patience: 10
+
+# Data
+train/create_dataset.sources:
+  nsynth:
+    - /scratch/$USER/datasets/nsynth/nsynth-test/audio
+
+val/create_dataset.num_steps: 100
+val/create_dataset.duration: 2
+val/create_dataset.sources:
+  nsynth:
+    - /scratch/$USER/datasets/nsynth/nsynth-test/audio
+
+sample/create_dataset.duration: 2
+sample/create_dataset.sources:
+  nsynth:
+    - /scratch/$USER/datasets/nsynth/nsynth-test/audio
+
+test/create_dataset.duration: 4
+test/create_dataset.sources:
+  nsynth:
+    - /scratch/$USER/datasets/nsynth/nsynth-test/audio

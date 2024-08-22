@@ -5,6 +5,8 @@ os.environ["XLA_FLAGS"] = (
 os.environ["TF_CUDNN_DETERMINISTIC"] = '1'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
+from pathlib import Path
+
 import torch
 torch.use_deterministic_algorithms(True)
 
@@ -165,7 +167,7 @@ def test_equivalence_compress(verbose=False):
             print('max diff: ', jnp.abs(jax_recons-torch_recons).max())
         assert np.allclose(jax_recons, torch_recons, atol=atol)
 
-    np_data, sr = librosa.load('assets/60013__qubodup__whoosh.flac', sr=None, mono=True)
+    np_data, sr = librosa.load(Path(__file__).parent / 'assets/60013__qubodup__whoosh.flac', sr=None, mono=True)
     np_data = np.expand_dims(np.array(np_data), 0)
     np_data = np.expand_dims(np.array(np_data), 0)
     np_data = np.concatenate([np_data, np_data, np_data, np_data], axis=-1)

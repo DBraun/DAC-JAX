@@ -3,27 +3,65 @@ from dataclasses import field
 from audiotree.resample import resample
 from einops import rearrange
 import flax.linen as nn
-import jax.numpy as jnp
-import jax.scipy.signal
+import jax
+from jax import numpy as jnp
 
 from dac_jax.audio_utils import stft
-from dac_jax.nn.layers import LeakyReLU
+from dac_jax.nn.layers import make_initializer
 
 
-def disc_WNConv1d(*args, act=True, **kwargs):
-    kernel_init = nn.initializers.variance_scaling(1/3, "fan_in", "uniform")  # same as PyTorch
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=kernel_init))]
-    if act:
-        layers.append(LeakyReLU(0.1))
-    return nn.Sequential(layers)
+class LeakyReLU(nn.Module):
+
+    negative_slope: float = .01
+
+    @nn.compact
+    def __call__(self, x):
+        return nn.leaky_relu(x, negative_slope=self.negative_slope)
 
 
-def WNConv2d(*args, act=True, **kwargs):
-    kernel_init = nn.initializers.variance_scaling(1/3, "fan_in", "uniform")  # same as PyTorch?
-    layers = [nn.WeightNorm(nn.Conv(*args, **kwargs, kernel_init=kernel_init))]
-    if act:
-        layers.append(LeakyReLU(0.1))
-    return nn.Sequential(layers)
+class WNConv(nn.Conv):
+
+    act: bool = True
+
+    @nn.compact
+    def __call__(self, x):
+
+        kernel_init = make_initializer(
+            x.shape[-1], self.features, self.kernel_size, self.feature_group_count, mode="fan_in",
+        )
+
+        if self.use_bias:
+            # note: we just ignore whatever self.bias_init is
+            bias_init = make_initializer(
+                x.shape[-1], self.features, self.kernel_size, self.feature_group_count, mode="fan_in",
+            )
+        else:
+            bias_init = None
+
+        conv = nn.Conv(
+            features=self.features,
+            kernel_size=self.kernel_size,
+            strides=self.strides,
+            padding=self.padding,
+            input_dilation=self.input_dilation,
+            kernel_dilation=self.kernel_dilation,
+            feature_group_count=self.feature_group_count,
+            use_bias=self.use_bias,
+            mask=self.mask,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+            precision=self.precision,
+            kernel_init=kernel_init,
+            bias_init=bias_init
+        )
+        scale_init = nn.initializers.constant(1 / jnp.sqrt(3))
+        block = nn.WeightNorm(conv, scale_init=scale_init)
+        x = block(x)
+
+        if self.act:
+            x = LeakyReLU(.1)(x)
+
+        return x
 
 
 class MPD(nn.Module):
@@ -38,12 +76,12 @@ class MPD(nn.Module):
     @nn.compact
     def __call__(self, x):
         convs = [
-            WNConv2d(features=32, kernel_size=(5, 1), strides=(3, 1), padding=(2, 0)),
-            WNConv2d(features=128, kernel_size=(5, 1), strides=(3, 1), padding=(2, 0)),
-            WNConv2d(features=512, kernel_size=(5, 1), strides=(3, 1), padding=(2, 0)),
-            WNConv2d(features=1024, kernel_size=(5, 1), strides=(3, 1), padding=(2, 0)),
-            WNConv2d(features=1024, kernel_size=(5, 1), strides=(1, 1), padding=(2, 0)),
-            WNConv2d(features=1, kernel_size=(3, 1), padding=(1, 0), act=False)
+            WNConv(features=32, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
+            WNConv(features=128, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
+            WNConv(features=512, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
+            WNConv(features=1024, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
+            WNConv(features=1024, kernel_size=(5, 1), strides=(1, 1), padding=((2, 2), (0, 0))),
+            WNConv(features=1, kernel_size=(3, 1), padding=((1, 1), (0, 0)), act=False)
         ]
 
         fmap = []
@@ -66,13 +104,13 @@ class MSD(nn.Module):
     @nn.compact
     def __call__(self, x):
         convs = [
-            disc_WNConv1d(features=16, kernel_size=15, strides=1, padding=7),
-            disc_WNConv1d(features=64, kernel_size=41, strides=4, feature_group_count=4, padding=20),
-            disc_WNConv1d(features=256, kernel_size=41, strides=4, feature_group_count=16, padding=20),
-            disc_WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=64, padding=20),
-            disc_WNConv1d(features=1024, kernel_size=41, strides=4, feature_group_count=256, padding=20),
-            disc_WNConv1d(features=1024, kernel_size=5, strides=1, padding=2),
-            disc_WNConv1d(features=1, kernel_size=3, strides=1, padding=1, act=False)
+            WNConv(features=16, kernel_size=15, strides=1, padding=7),
+            WNConv(features=64, kernel_size=41, strides=4, feature_group_count=4, padding=20),
+            WNConv(features=256, kernel_size=41, strides=4, feature_group_count=16, padding=20),
+            WNConv(features=1024, kernel_size=41, strides=4, feature_group_count=64, padding=20),
+            WNConv(features=1024, kernel_size=41, strides=4, feature_group_count=256, padding=20),
+            WNConv(features=1024, kernel_size=5, strides=1, padding=2),
+            WNConv(features=1, kernel_size=3, strides=1, padding=1, act=False)
         ]
 
         x = resample(x, old_sr=self.sample_rate, new_sr=self.sample_rate//self.rate)
@@ -100,7 +138,7 @@ class MRD(nn.Module):
 
     def __post_init__(self) -> None:
         n_fft = self.window_length // 2 + 1
-        self.bands = [(int(b[0] * n_fft), int(b[1] * n_fft)) for b in self.bands]
+        self.bands = [(int(low * n_fft), int(high * n_fft)) for low, high in self.bands]
         super().__post_init__()
 
     @nn.compact
@@ -121,14 +159,14 @@ class MRD(nn.Module):
 
         ch = 32
         convs = lambda: [
-            WNConv2d(features=ch, kernel_size=(3, 9), strides=(1, 1), padding=(1, 4)),
-            WNConv2d(features=ch, kernel_size=(3, 9),  strides=(1, 2), padding=(1, 4)),
-            WNConv2d(features=ch, kernel_size=(3, 9),  strides=(1, 2), padding=(1, 4)),
-            WNConv2d(features=ch, kernel_size=(3, 9),  strides=(1, 2), padding=(1, 4)),
-            WNConv2d(features=ch, kernel_size=(3, 3),  strides=(1, 1), padding=(1, 1)),
+            WNConv(features=ch, kernel_size=(3, 9), strides=(1, 1), padding=((1, 1), (4, 4))),
+            WNConv(features=ch, kernel_size=(3, 9),  strides=(1, 2), padding=((1, 1), (4, 4))),
+            WNConv(features=ch, kernel_size=(3, 9),  strides=(1, 2), padding=((1, 1), (4, 4))),
+            WNConv(features=ch, kernel_size=(3, 9),  strides=(1, 2), padding=((1, 1), (4, 4))),
+            WNConv(features=ch, kernel_size=(3, 3),  strides=(1, 1), padding=((1, 1), (1, 1))),
         ]
         band_convs = [convs() for _ in range(len(self.bands))]
-        conv_post = WNConv2d(features=1, kernel_size=(3, 3), strides=(1, 1), padding=(1, 1), act=False)
+        conv_post = WNConv(features=1, kernel_size=(3, 3), strides=(1, 1), padding=((1, 1), (1, 1)), act=False)
 
         x_bands = self.get_bands(x)
         fmap = []
@@ -152,7 +190,7 @@ class MRD(nn.Module):
         x = self.as_real(stft_data)
         x = rearrange(x, "b c f t ri -> (b c) ri t f", c=1, ri=2)  # ri is 2 for real and imaginary
         # Split into bands
-        x_bands = [x[..., b[0]:b[1]] for b in self.bands]
+        x_bands = [x[..., low:high] for low, high in self.bands]
         return x_bands
 
     @staticmethod
@@ -208,20 +246,24 @@ class Discriminator(nn.Module):
 
 
 if __name__ == "__main__":
+    import numpy as np
+
     disc = Discriminator()
     x = jnp.zeros(shape=(1, 1, 44100))
 
-    # print(disc.tabulate(jax.random.key(1), x,
-    #                     compute_flops=True,
-    #                     compute_vjp_flops=True
-    #                     ))
+    print(disc.tabulate(jax.random.key(1), x,
+                        # compute_flops=True,
+                        # compute_vjp_flops=True,
+                        depth=3,
+                        # column_kwargs={"width": 400},
+                        console_kwargs={"width": 400},
+                        ))
 
-    variables = disc.init(jax.random.key(0), x)
-    params = variables['params']
+    results, variables = disc.init_with_output(jax.random.key(3), x)
 
-    results = disc.apply({'params': params}, x)
     for i, result in enumerate(results):
         print(f"disc{i}")
-        for i, r in enumerate(result):
-            print(r.shape, r.mean(), r.min(), r.max())
+        for i, _r in enumerate(result):
+            r = np.array(_r)
+            print(r.shape, f"{r.mean().item():,.5f}, {r.min().item():,.5f} {r.max().item():,.5f}")
     print('All Done!')

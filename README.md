@@ -162,12 +162,12 @@ y = model.decompress(decompress_chunk, dac_file)
 The baseline model configuration can be trained using the following commands.
 
 ```bash
-python scripts/train.py --args.load conf/base.yml
+python scripts/train.py --args.load conf/final/44khz.yml --train.ckpt_dir="/tmp/dac_jax_runs"
 ```
 
 In root directory, monitor with Tensorboard (`runs` will appear next to `scripts`):
 ```bash
-tensorboard --logdir ./runs
+tensorboard --logdir="/tmp/dac_jax_runs"
 ```
 
 ## Testing

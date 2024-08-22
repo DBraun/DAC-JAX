@@ -1,18 +1,8 @@
 import math
-from typing import Optional, Sequence, Union
-
 import flax.linen as nn
-from flax.typing import (
-  Array,
-  Dtype,
-  PrecisionLike,
-  PaddingLike,
-  Initializer,
-)
+
 import jax
 import jax.numpy as jnp
-
-from .weight_norm import WeightNorm as MyWeightNorm
 
 
 def default_stride(strides):
@@ -63,36 +53,29 @@ def convtranspose_to_output_length(s, d, k, L):
     return L
 
 
-class LeakyReLU(nn.Module):
+def make_initializer(in_channels, out_channels, kernel_size, groups, mode="fan_in"):
+    # https://pytorch.org/docs/stable/generated/torch.nn.Conv1d.html
+    if mode == "fan_in":
+        c = in_channels
+    elif mode == "fan_out":
+        c = out_channels
+    else:
+        raise ValueError(f"Unexpected mode: {mode}")
+    k = groups / (c * jnp.prod(jnp.array(kernel_size)))
+    scale = jnp.sqrt(k)
+    return lambda key, shape, dtype: jax.random.uniform(key, shape, minval=-scale, maxval=scale, dtype=dtype)
 
-    negative_slope: float = .01
 
-    @nn.compact
-    def __call__(self, x):
-        return nn.leaky_relu(x, negative_slope=self.negative_slope)
-
-
-class WNConv1d(nn.Module):
-
-    features: int
-    kernel_size: Union[int, Sequence[int]]
-    strides: Union[None, int, Sequence[int]] = 1
-    padding: PaddingLike = 'SAME'
-    input_dilation: Union[None, int, Sequence[int]] = 1
-    kernel_dilation: Union[None, int, Sequence[int]] = 1
-    feature_group_count: int = 1
-    use_bias = True
-    mask: Optional[Array] = None
-    dtype: Optional[Dtype] = None
-    param_dtype: Dtype = jnp.float32
-    precision: PrecisionLike = None
-    # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
-    # https://github.com/google/flax/issues/4091
-    kernel_init: nn.initializers.Initializer = jax.nn.initializers.truncated_normal(.02, lower=-2/.02, upper=2/.02)
-    bias_init: nn.initializers.Initializer = nn.initializers.zeros
+class WNConv1d(nn.Conv):
 
     @nn.compact
     def __call__(self, x):
+        # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
+        # https://github.com/google/flax/issues/4091
+        # Note: we are just ignoring whatever self.kernel_init and self.bias_init are.
+        kernel_init = jax.nn.initializers.truncated_normal(.02, lower=-2 / .02, upper=2 / .02)
+        bias_init = nn.initializers.zeros
+
         conv = nn.Conv(
             features=self.features,
             kernel_size=self.kernel_size,
@@ -106,12 +89,11 @@ class WNConv1d(nn.Module):
             dtype=self.dtype,
             param_dtype=self.param_dtype,
             precision=self.precision,
-            kernel_init=self.kernel_init,
-            bias_init=self.bias_init
+            kernel_init=kernel_init,
+            bias_init=bias_init
         )
-        # MyWeightNorm initializes itself as if the conv had been initialized the way PyTorch would have instead
-        # of what we did (truncated normal).
-        block = MyWeightNorm(conv)
+        scale_init = nn.initializers.constant(1/jnp.sqrt(3))
+        block = nn.WeightNorm(conv, scale_init=scale_init)
         x = block(x)
         return x
 
@@ -130,27 +112,25 @@ class WNConv1d(nn.Module):
         return conv_to_output_length(s, d, k, L)
 
 
-class WNConvTranspose1d(nn.Module):
-
-    # Note: set tranpose_kernel=True because PyTorch's kernels are transposed relative to JAX.
-    # https://flax.readthedocs.io/en/latest/guides/converting_and_upgrading/convert_pytorch_to_flax.html#transposed-convolutions
-
-    features: int
-    kernel_size: Union[int, Sequence[int]]
-    strides: Optional[Sequence[int]] = None
-    padding: PaddingLike = 'SAME'
-    kernel_dilation: Optional[Sequence[int]] = None
-    use_bias = True
-    mask: Optional[Array] = None
-    dtype: Optional[Dtype] = None
-    param_dtype: Dtype = jnp.float32
-    precision: PrecisionLike = None
-    kernel_init: Initializer = nn.initializers.variance_scaling(1/3, "fan_out", "uniform")  # to match PyTorch
-    bias_init: Initializer = nn.initializers.zeros_init()
-    transpose_kernel = True  # note: non-standard
+class WNConvTranspose1d(nn.ConvTranspose):
 
     @nn.compact
     def __call__(self, x):
+
+        groups = 1
+        # note: we just ignore whatever self.kernel_init is
+        kernel_init = make_initializer(
+            x.shape[-1], self.features, self.kernel_size, groups, mode="fan_out",
+        )
+
+        if self.use_bias:
+            # note: we just ignore whatever self.bias_init is
+            bias_init = make_initializer(
+                x.shape[-1], self.features, self.kernel_size, groups, mode="fan_out",
+            )
+        else:
+            bias_init = None
+
         conv = nn.ConvTranspose(
             features=self.features,
             kernel_size=self.kernel_size,
@@ -162,11 +142,12 @@ class WNConvTranspose1d(nn.Module):
             dtype=self.dtype,
             param_dtype=self.param_dtype,
             precision=self.precision,
-            kernel_init=self.kernel_init,
-            bias_init=self.bias_init,
-            transpose_kernel=self.transpose_kernel
+            kernel_init=kernel_init,
+            bias_init=bias_init,
+            transpose_kernel=True  # note: this helps us load weights from PyTorch
         )
-        block = nn.WeightNorm(conv)  # note: we use the epsilon default
+        scale_init = nn.initializers.constant(1 / jnp.sqrt(3))
+        block = nn.WeightNorm(conv, scale_init=scale_init)
         x = block(x)
         return x
 
