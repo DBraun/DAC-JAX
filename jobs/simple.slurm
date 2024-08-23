@@ -23,8 +23,6 @@ function cleanup() {
 ## Trap the SIGTERM signal (sent by scancel) and call the cleanup function
 trap cleanup EXIT SIGINT SIGTERM
 
-alias showtime="echo \"The current time is \$(date '+%H:%M:%S')\""
-
 module purge
 module load anaconda3/2024.02
 
@@ -34,24 +32,18 @@ conda activate ../Terrapin/.env/jax-env
 export PYTHONPATH=$PWD
 
 ## prepare data
-echo "Copying data to /scratch"
-showtime
-##mkdir -p "/scratch/$USER/datasets/nsynth/nsynth-valid"
-##rsync -a --info=progress2 --no-i-r "/n/fs/audiovis/$USER/datasets/nsynth/nsynth-valid" "/scratch/$USER/datasets/nsynth"
+echo "$(date '+%H:%M:%S'): Copying data to /scratch"
 mkdir -p "/scratch/$USER/datasets"
 rsync -a --info=progress2 --no-i-r "/n/fs/audiovis/$USER/datasets/nsynth" "/scratch/$USER/datasets"
-cd "/n/fs/audiovis/$USER/datasets/nsynth" || exit
-echo "Unzipping test"
-showtime
+
+cd "/scratch/$USER/datasets/nsynth" || exit
+echo "$(date '+%H:%M:%S'): Unzipping test"
 tar -xzf nsynth-test.jsonwav.tar.gz
-echo "Unzipping valid"
-showtime
+echo "$(date '+%H:%M:%S'): Unzipping valid"
 tar -xzf nsynth-valid.jsonwav.tar.gz
-echo "Unzipping train"
-showtime
+echo "$(date '+%H:%M:%S'): Unzipping train"
 tar -xzf nsynth-train.jsonwav.tar.gz
-echo "Copied data to /scratch"
-showtime
+echo "$(date '+%H:%M:%S'): Copied data to /scratch"
 
 ## Launch TensorBoard and get the process ID of TensorBoard
 tensorboard --logdir="/scratch/$USER/runs" --port=10013 --samples_per_plugin audio=20 --bind_all & TB_PID=$!
