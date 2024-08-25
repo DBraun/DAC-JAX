@@ -15,7 +15,7 @@ function cleanup() {
     echo 'Running cleanup script'
     kill $TRAIN_PID
     kill $TB_PID
-    mv "/scratch/$USER/runs/slurm_$SLURM_JOB_ID" "/n/fs/audiovis/$USER/DAC-JAX/runs"
+    cp -r "/scratch/$USER/runs/slurm_$SLURM_JOB_ID" "/n/fs/audiovis/$USER/DAC-JAX/runs"
     rm -rf "/scratch/$USER"
     exit 0
 }

@@ -1,7 +1,7 @@
 $include:
   - conf/final/44khz.yml
 
-train.batch_size: 4
+train.batch_size: 8
 train.val_batch_size: 4
 train.sample_batch_size: 1
 train.valid_freq: 4000
@@ -11,10 +11,33 @@ train.tabulate: 0
 
 EarlyStopping.patience: 10
 
-SaliencyParams.search_function: SaliencyParams.search_bias_early
-
 # Data
 create_dataset.worker_count: 0
+
+# Data Augmentation
+VolumeChange.config:
+  min_db: -10
+  max_db: 0
+
+train/build_transforms.augment:
+  - VolumeChange
+  - RescaleAudio
+  - ShiftPhase
+
+val/build_transforms.augment:
+  - VolumeChange
+  - RescaleAudio
+
+sample/build_transforms.augment:
+  - VolumeNorm
+  - RescaleAudio
+
+# Data
+# This should be equivalent to how DAC used salient_excerpt from AudioTools.
+SaliencyParams.enabled: 1
+SaliencyParams.num_tries: 8
+SaliencyParams.loudness_cutoff: -40
+SaliencyParams.search_function: SaliencyParams.search_bias_early
 
 train/create_dataset.sources:
   nsynth:
