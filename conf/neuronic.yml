@@ -36,7 +36,7 @@ sample/build_transforms.augment:
 # This should be equivalent to how DAC used salient_excerpt from AudioTools.
 SaliencyParams.enabled: 1
 SaliencyParams.num_tries: 8
-SaliencyParams.loudness_cutoff: -40
+SaliencyParams.loudness_cutoff: -30
 SaliencyParams.search_function: SaliencyParams.search_bias_early
 
 train/create_dataset.sources:
