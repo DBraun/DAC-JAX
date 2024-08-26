@@ -32,17 +32,27 @@ conda activate ../Terrapin/.env/jax-env
 export PYTHONPATH=$PWD
 
 ## prepare data
+##echo "$(date '+%H:%M:%S'): Copying data to /scratch"
+##mkdir -p "/scratch/$USER/datasets"
+##rsync -a --info=progress2 --no-i-r "/n/fs/audiovis/$USER/datasets/nsynth" "/scratch/$USER/datasets"
+#
+##cd "/scratch/$USER/datasets/nsynth" || exit
+##echo "$(date '+%H:%M:%S'): Unzipping test"
+##tar -xzf nsynth-test.jsonwav.tar.gz
+##echo "$(date '+%H:%M:%S'): Unzipping valid"
+##tar -xzf nsynth-valid.jsonwav.tar.gz
+##echo "$(date '+%H:%M:%S'): Unzipping train"
+##tar -xzf nsynth-train.jsonwav.tar.gz
+##echo "$(date '+%H:%M:%S'): Copied data to /scratch"
+
+## prepare data
 echo "$(date '+%H:%M:%S'): Copying data to /scratch"
 mkdir -p "/scratch/$USER/datasets"
-rsync -a --info=progress2 --no-i-r "/n/fs/audiovis/$USER/datasets/nsynth" "/scratch/$USER/datasets"
+rsync -a --info=progress2 --no-i-r "/n/fs/audiovis/$USER/datasets/musdb18hq" "/scratch/$USER/datasets"
 
-cd "/scratch/$USER/datasets/nsynth" || exit
-echo "$(date '+%H:%M:%S'): Unzipping test"
-tar -xzf nsynth-test.jsonwav.tar.gz
-echo "$(date '+%H:%M:%S'): Unzipping valid"
-tar -xzf nsynth-valid.jsonwav.tar.gz
-echo "$(date '+%H:%M:%S'): Unzipping train"
-tar -xzf nsynth-train.jsonwav.tar.gz
+cd "/scratch/$USER/datasets/musdb18hq" || exit
+echo "$(date '+%H:%M:%S'): Unzipping musdb18hq"
+unzip musdb18hq.zip
 echo "$(date '+%H:%M:%S'): Copied data to /scratch"
 
 ## Launch TensorBoard and get the process ID of TensorBoard

@@ -19,35 +19,39 @@ VolumeChange.config:
   min_db: -10
   max_db: 0
 
-train/build_transforms.augment:
-  - VolumeChange
-  - RescaleAudio
-  - ShiftPhase
-
-val/build_transforms.augment:
-  - VolumeChange
-  - RescaleAudio
-
-sample/build_transforms.augment:
-  - VolumeNorm
-  - RescaleAudio
+#train/build_transforms.augment:
+#  - VolumeChange
+#  - RescaleAudio
+#  - ShiftPhase
+#
+#val/build_transforms.augment:
+#  - VolumeChange
+#  - RescaleAudio
+#
+#sample/build_transforms.augment:
+#  - VolumeNorm
+#  - RescaleAudio
 
 # Data
 # This should be equivalent to how DAC used salient_excerpt from AudioTools.
 SaliencyParams.enabled: 1
 SaliencyParams.num_tries: 8
-SaliencyParams.loudness_cutoff: -30
+SaliencyParams.loudness_cutoff: -40
 SaliencyParams.search_function: SaliencyParams.search_bias_early
 
 train/create_dataset.sources:
-  nsynth:
-    - /scratch/$USER/datasets/nsynth/nsynth-train/audio
+  musdb18hq:
+    - /scratch/$USER/datasets/musdb18hq/train/*/mixture.wav
+#  nsynth:
+#    - /scratch/$USER/datasets/nsynth/nsynth-train/audio
 
 val/create_dataset.num_steps: 100
 val/create_dataset.duration: 2
 val/create_dataset.sources:
-  nsynth:
-    - /scratch/$USER/datasets/nsynth/nsynth-valid/audio
+  musdb18hq:
+    - /scratch/$USER/datasets/musdb18hq/test/*/mixture.wav
+#  nsynth:
+#    - /scratch/$USER/datasets/nsynth/nsynth-valid/audio
 
 sample/create_dataset.duration: 2
 sample/create_dataset.sources:
