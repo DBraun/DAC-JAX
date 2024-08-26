@@ -55,10 +55,14 @@ val/create_dataset.sources:
 
 sample/create_dataset.duration: 2
 sample/create_dataset.sources:
-  nsynth:
-    - /scratch/$USER/datasets/nsynth/nsynth-valid/audio
+  musdb18hq:
+    - /scratch/$USER/datasets/musdb18hq/test/*/mixture.wav
+#  nsynth:
+#    - /scratch/$USER/datasets/nsynth/nsynth-valid/audio
 
 test/create_dataset.duration: 4
 test/create_dataset.sources:
-  nsynth:
-    - /scratch/$USER/datasets/nsynth/nsynth-test/audio
+  musdb18hq:
+    - /scratch/$USER/datasets/musdb18hq/test/*/mixture.wav
+#  nsynth:
+#    - /scratch/$USER/datasets/nsynth/nsynth-test/audio

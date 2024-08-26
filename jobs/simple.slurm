@@ -52,7 +52,7 @@ rsync -a --info=progress2 --no-i-r "/n/fs/audiovis/$USER/datasets/musdb18hq" "/s
 
 cd "/scratch/$USER/datasets/musdb18hq" || exit
 echo "$(date '+%H:%M:%S'): Unzipping musdb18hq"
-unzip musdb18hq.zip
+unzip -q musdb18hq.zip
 echo "$(date '+%H:%M:%S'): Copied data to /scratch"
 
 ## Launch TensorBoard and get the process ID of TensorBoard
