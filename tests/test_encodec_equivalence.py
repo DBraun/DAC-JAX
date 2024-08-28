@@ -7,7 +7,8 @@ import librosa
 import numpy as np
 import torch
 
-from dac_jax import SEANetEncoder, SEANetDecoder, EncodecModel
+from dac_jax import EncodecModel
+from dac_jax.model.encodec import SEANetEncoder, SEANetDecoder
 from dac_jax.nn.encodec_quantize import ResidualVectorQuantizer
 from dac_jax.utils.load_torch_weights_encodec import torch_to_linen
 
