@@ -25,7 +25,7 @@ def apply_parametrization_norm(module: nn.Module, norm: str = 'none'):
     if norm == 'weight_norm':
         # why we use scale_init: https://github.com/google/flax/issues/4138
         scale_init = nn.initializers.constant(1 / jnp.sqrt(3))
-        return nn.WeightNorm(module, scale_init=scale_init)  # todo: special scale_init?
+        return nn.WeightNorm(module, scale_init=scale_init)
     elif norm == 'spectral_norm':
         # todo: implement Spectral Norm
         raise ValueError("Spectral norm is not implemented.")
@@ -45,9 +45,7 @@ def get_norm_module(module: nn.Module, causal: bool = False, norm: str = 'none',
         if causal:
             raise ValueError("GroupNorm doesn't support causal evaluation.")
         assert isinstance(module, nn.Conv)
-        return nn.GroupNorm(num_groups=1,
-                            # group_size=module.out_channels,  # todo: delete this kwarg
-                            **norm_kwargs)
+        return nn.GroupNorm(num_groups=1, **norm_kwargs)
     else:
         return lambda x: x
 
@@ -179,7 +177,6 @@ class NormConv2d(nn.Conv):
             features=self.features,
             kernel_size=self.kernel_size,
             strides=self.strides,
-            # padding='SAME',
             padding='VALID',
             input_dilation=self.input_dilation,
             kernel_dilation=self.kernel_dilation,
@@ -227,7 +224,6 @@ class NormConvTranspose1d(nn.ConvTranspose):
             features=self.features,
             kernel_size=self.kernel_size,
             strides=self.strides,
-            # padding='SAME',
             padding='VALID',
             kernel_dilation=self.kernel_dilation,
             use_bias=self.use_bias,
@@ -273,7 +269,6 @@ class NormConvTranspose2d(nn.ConvTranspose):
             features=self.features,
             kernel_size=self.kernel_size,
             strides=self.strides,
-            # padding='SAME',
             padding='VALID',
             kernel_dilation=self.kernel_dilation,
             use_bias=self.use_bias,
@@ -320,7 +315,7 @@ class StreamableConv1d(nn.Module):
                           kernel_dilation=self.dilation, feature_group_count=self.groups, use_bias=self.bias,
                           causal=self.causal, norm=self.norm, norm_kwargs=self.norm_kwargs)
         B, T, C = x.shape
-        kernel_size = conv.kernel_size  # todo: weird access
+        kernel_size = conv.kernel_size
         stride = conv.strides
         dilation = conv.kernel_dilation
         kernel_size = (kernel_size - 1) * dilation + 1  # effective kernel size with dilations
@@ -360,7 +355,7 @@ class StreamableConvTranspose1d(nn.Module):
     def __call__(self, x):
         convtr = NormConvTranspose1d(self.out_channels, kernel_size=self.kernel_size, strides=self.stride,
                                      causal=self.causal, norm=self.norm, norm_kwargs=self.norm_kwargs)
-        kernel_size = convtr.kernel_size  # todo: weird access
+        kernel_size = convtr.kernel_size
         stride = convtr.strides
         padding_total = kernel_size - stride
 

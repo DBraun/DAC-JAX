@@ -48,13 +48,13 @@ class SEANetResnetBlock(nn.Module):
     @nn.compact
     def __call__(self, x):
         assert len(self.kernel_sizes) == len(self.dilations), 'Number of kernel sizes should match number of dilations'
-        act = getattr(nn.activation, self.activation)
+        act = lambda y: getattr(nn.activation, self.activation)(y, **self.activation_params)
         hidden = self.dim // self.compress
         block = []
         for i, (kernel_size, dilation) in enumerate(zip(self.kernel_sizes, self.dilations)):
             out_chs = self.dim if i == len(self.kernel_sizes) - 1 else hidden
             block += [
-                lambda y: act(y, **self.activation_params),
+                act,
                 StreamableConv1d(out_chs, kernel_size=kernel_size, dilation=dilation,
                                  norm=self.norm, norm_kwargs=self.norm_params,
                                  causal=self.causal, pad_mode=self.pad_mode),
@@ -119,7 +119,6 @@ class SEANetEncoder(nn.Module):
     disable_norm_outer_blocks: int = 0
 
     def __post_init__(self) -> None:
-        self.ratios = list(reversed(self.ratios))
         self.hop_length = np.prod(self.ratios)
         self.n_blocks = len(self.ratios) + 2  # first and last conv + residual blocks
         assert self.disable_norm_outer_blocks >= 0 and self.disable_norm_outer_blocks <= self.n_blocks, \
@@ -129,7 +128,7 @@ class SEANetEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        act = getattr(nn.activation, self.activation)
+        act = lambda y: getattr(nn.activation, self.activation)(y, **self.activation_params)
         mult = 1
         layers = [
             StreamableConv1d(mult * self.n_filters, kernel_size=self.kernel_size,
@@ -137,7 +136,7 @@ class SEANetEncoder(nn.Module):
                              norm_kwargs=self.norm_params, causal=self.causal, pad_mode=self.pad_mode)
         ]
         # Downsample to raw audio scale
-        for i, ratio in enumerate(self.ratios):
+        for i, ratio in enumerate(reversed(self.ratios)):
             block_norm = 'none' if self.disable_norm_outer_blocks >= i + 2 else self.norm
             # Add residual layers
             for j in range(self.n_residual_layers):
@@ -151,7 +150,7 @@ class SEANetEncoder(nn.Module):
 
             # Add downsampling layers
             layers += [
-                lambda y: act(y, **self.activation_params),
+                act,
                 StreamableConv1d(mult * self.n_filters * 2,
                                  kernel_size=ratio * 2, stride=ratio,
                                  norm=block_norm, norm_kwargs=self.norm_params,
@@ -163,7 +162,7 @@ class SEANetEncoder(nn.Module):
             layers += [StreamableLSTM(mult * self.n_filters, num_layers=self.lstm)]
 
         layers += [
-            lambda y: act(y, **self.activation_params),
+            act,
             StreamableConv1d(self.dimension, kernel_size=self.last_kernel_size,
                              norm='none' if self.disable_norm_outer_blocks == self.n_blocks else self.norm,
                              norm_kwargs=self.norm_params, causal=self.causal, pad_mode=self.pad_mode)
@@ -240,7 +239,7 @@ class SEANetDecoder(nn.Module):
     @nn.compact
     def __call__(self, z):
         z = z.transpose(0, 2, 1)
-        act = getattr(nn.activation, self.activation)
+        act = lambda y: getattr(nn.activation, self.activation)(y, **self.activation_params)
         mult = int(2 ** len(self.ratios))
         layers = [
             StreamableConv1d(mult * self.n_filters, kernel_size=self.kernel_size,
@@ -256,7 +255,7 @@ class SEANetDecoder(nn.Module):
             block_norm = 'none' if self.disable_norm_outer_blocks >= self.n_blocks - (i + 1) else self.norm
             # Add upsampling layers
             layers += [
-                lambda y: act(y, **self.activation_params),
+                act,
                 StreamableConvTranspose1d(mult * self.n_filters // 2,
                                           kernel_size=ratio * 2, stride=ratio,
                                           norm=block_norm, norm_kwargs=self.norm_params,
@@ -275,7 +274,7 @@ class SEANetDecoder(nn.Module):
 
         # Add final layers
         layers += [
-            lambda y: act(y, **self.activation_params),
+            act,
             StreamableConv1d(self.channels, kernel_size=self.last_kernel_size,
                              norm='none' if self.disable_norm_outer_blocks >= 1 else self.norm,
                              norm_kwargs=self.norm_params, causal=self.causal, pad_mode=self.pad_mode)
@@ -409,7 +408,7 @@ class EncodecModel(CompressionModel):
             volume = jnp.sqrt(jnp.square(mono).mean(axis=2, keepdims=True))
             scale = 1e-8 + volume
             x = x / scale
-            scale = scale.view(-1, 1)
+            scale = scale.reshape(-1, 1)
         else:
             scale = None
         return x, scale
@@ -419,7 +418,7 @@ class EncodecModel(CompressionModel):
                     scale: tp.Optional[jnp.ndarray] = None) -> jnp.ndarray:
         if scale is not None:
             assert self.renormalize
-            x = x * scale.view(-1, 1, 1)
+            x = x * scale.reshape(-1, 1, 1)
         return x
 
     def __call__(self, x: jnp.ndarray):  # todo: -> qt.QuantizedResult:
