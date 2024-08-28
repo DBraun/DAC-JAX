@@ -228,7 +228,7 @@ def run_jax_model(np_data):
         "residual_kernel_size": 3,
         "dilation_base": 2,
         "causal": False,
-        "pad_mode": "constant",
+        "pad_mode": "reflect",
         "true_skip": True,
         "compress": 2,
         "lstm": 2,
@@ -259,14 +259,16 @@ def run_jax_model(np_data):
         orthogonal_reg_max_codes=None,
     )
 
+    sample_rate = 32_000
+
     encodec_model = EncodecModel(
         encoder=encoder,
         decoder=decoder,
         quantizer=quantizer,
         causal=False,
         renormalize=False,
-        frame_rate=50,
-        sample_rate=32_000,
+        frame_rate=sample_rate // encoder.hop_length,
+        sample_rate=sample_rate,
         channels=1,
     )
 

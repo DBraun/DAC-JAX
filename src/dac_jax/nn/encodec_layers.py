@@ -90,6 +90,10 @@ def pad1d(
     length = x.shape[-2]
     padding_left, padding_right = paddings
     assert padding_left >= 0 and padding_right >= 0, (padding_left, padding_right)
+    if mode == "constant":
+        pad_kwargs = {"constant_values": value}
+    else:
+        pad_kwargs = {}
     if mode == "reflect":
         max_pad = max(padding_left, padding_right)
         extra_pad = 0
@@ -97,14 +101,12 @@ def pad1d(
             extra_pad = max_pad - length + 1
             x = jnp.pad(x, ((0, 0), (0, extra_pad), (0, 0)))
         padded = jnp.pad(
-            x, pad_width=((0, 0), paddings, (0, 0)), mode=mode, constant_values=value
+            x, pad_width=((0, 0), paddings, (0, 0)), mode=mode, **pad_kwargs
         )
         end = padded.shape[-2] - extra_pad
         return padded[:, :end, :]
     else:
-        return jnp.pad(
-            x, pad_width=((0, 0), paddings, (0, 0)), mode=mode, constant_values=value
-        )
+        return jnp.pad(x, pad_width=((0, 0), paddings, (0, 0)), mode=mode, **pad_kwargs)
 
 
 def unpad1d(x: jnp.ndarray, paddings: tp.Tuple[int, int]):
