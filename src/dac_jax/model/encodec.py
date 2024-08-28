@@ -4,14 +4,14 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from abc import ABC, abstractmethod, abstractproperty
-from dataclasses import field, dataclass
+from abc import ABC, abstractmethod
+from dataclasses import field
 import typing as tp
 
 from einops import rearrange
-import numpy as np
-from jax import numpy as jnp
 from flax import linen as nn
+from jax import numpy as jnp
+import numpy as np
 
 from dac_jax.nn.encodec_layers import (
     StreamableConv1d,
@@ -511,13 +511,13 @@ class EncodecModel(CompressionModel):
             x = x * scale.reshape(-1, 1, 1)
         return x
 
-    def __call__(self, x: jnp.ndarray):  # todo: -> qt.QuantizedResult:
+    def __call__(self, x: jnp.ndarray, train=False):  # todo: -> qt.QuantizedResult:
         assert x.ndim == 3
         length = x.shape[-1]
         x, scale = self.preprocess(x)
 
         emb = self.encoder(x)
-        q_res = self.quantizer(emb, self.frame_rate)
+        q_res = self.quantizer(emb, self.frame_rate, train=train)
         out = self.decoder(q_res.x)
 
         out = rearrange(out, "B T C -> B C T")

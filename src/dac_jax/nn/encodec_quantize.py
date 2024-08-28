@@ -11,25 +11,12 @@ Base class for all quantizers.
 from dataclasses import dataclass, field
 import typing as tp
 
-import flax.training.common_utils
-import jax.lax
 from einops import einsum, rearrange
-
-from jax import numpy as jnp
-from jax import random
-
 from flax import linen as nn
 from flax.training.common_utils import onehot
-
-# import torch
-# from torch import nn
-
-import typing as tp
-
-# import torch
-
-# from .base import BaseQuantizer, QuantizedResult
-# from .core_vq import ResidualVectorQuantization
+import jax.lax
+from jax import numpy as jnp
+from jax import random
 
 
 @dataclass
@@ -268,12 +255,10 @@ class EuclideanCodebook(nn.Module):
         return embed_ind
 
     def postprocess_emb(self, embed_ind, shape):
-        return jnp.reshape(embed_ind, shape[:-1])  # todo:
-        # return embed_ind.view(*shape[:-1])
+        return jnp.reshape(embed_ind, shape[:-1])
 
     def dequantize(self, embed_ind):
-        # quantize = F.embedding(embed_ind, self.embed)
-        quantize = self.embed[embed_ind]  # todo:
+        quantize = self.embed[embed_ind]
         return quantize
 
     def encode(self, x):
@@ -480,9 +465,8 @@ class ResidualVectorQuantization(nn.Module):
         n_q = n_q or len(self.layers)
 
         for i, layer in enumerate(self.layers[:n_q]):
-            quantized, indices, loss = layer(residual)
-            # quantized = quantized.detach()
-            quantized = jax.lax.stop_gradient(quantized)  # todo:
+            quantized, indices, loss = layer(residual, train=train)
+            quantized = jax.lax.stop_gradient(quantized)
             residual = residual - quantized
             quantized_out = quantized_out + quantized
             all_indices.append(indices)
@@ -574,9 +558,8 @@ class ResidualVectorQuantizer(BaseQuantizer):
                 self.make_rng("rng_stream"), shape=(1,), minval=1, maxval=self.n_q + 1
             )
         bw_per_q = jnp.log2(self.bins) * frame_rate / 1000
-        quantized, codes, commit_loss = self.vq(x, n_q=n_q)
-        # codes = codes.transpose(0, 1)
-        codes = codes.transpose(1, 0, 2)  # todo:
+        quantized, codes, commit_loss = self.vq(x, n_q=n_q, train=train)
+        codes = codes.transpose(1, 0, 2)
         # codes is [B, K, T], with T frames, K nb of codebooks.
         bw = jnp.array(n_q * bw_per_q)
         return QuantizedResult(quantized, codes, bw, penalty=jnp.mean(commit_loss))

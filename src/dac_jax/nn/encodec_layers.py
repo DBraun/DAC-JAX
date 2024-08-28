@@ -9,9 +9,8 @@ import math
 import typing as tp
 import warnings
 
-from einops import rearrange
-from jax import numpy as jnp
 from flax import linen as nn
+from jax import numpy as jnp
 
 from dac_jax.nn.layers import make_initializer
 
