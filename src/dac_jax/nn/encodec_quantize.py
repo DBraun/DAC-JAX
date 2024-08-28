@@ -20,6 +20,7 @@ from jax import random
 
 from flax import linen as nn
 from flax.training.common_utils import onehot
+
 # import torch
 # from torch import nn
 
@@ -41,8 +42,7 @@ class QuantizedResult:
 
 
 class BaseQuantizer(nn.Module):
-    """Base class for quantizers.
-    """
+    """Base class for quantizers."""
 
     @nn.compact
     def __call__(self, x: jnp.ndarray, frame_rate: int) -> QuantizedResult:
@@ -78,13 +78,14 @@ class BaseQuantizer(nn.Module):
 
 
 class DummyQuantizer(BaseQuantizer):
-    """Fake quantizer that actually does not perform any quantization.
-    """
+    """Fake quantizer that actually does not perform any quantization."""
 
     @nn.compact
     def __call__(self, x: jnp.ndarray, frame_rate: int):
         q = x.unsqueeze(1)
-        return QuantizedResult(x, q, jnp.array(q.numel() * 32 * frame_rate / 1000 / len(x)))
+        return QuantizedResult(
+            x, q, jnp.array(q.numel() * 32 * frame_rate / 1000 / len(x))
+        )
 
     def encode(self, x: jnp.ndarray) -> jnp.ndarray:
         """Encode a given input tensor with the specified sample rate at the given bandwidth.
@@ -112,9 +113,11 @@ class DummyQuantizer(BaseQuantizer):
 
     def set_num_codebooks(self, n: int):
         """Set the number of active codebooks."""
-        raise AttributeError("Cannot override the number of codebooks for the dummy quantizer")
-    
-    
+        raise AttributeError(
+            "Cannot override the number of codebooks for the dummy quantizer"
+        )
+
+
 def exists(val: tp.Optional[tp.Any]) -> bool:
     return val is not None
 
@@ -156,10 +159,8 @@ def kmeans(samples, num_clusters: int, num_iters: int = 10):
     means = sample_vectors(samples, num_clusters)
 
     for _ in range(num_iters):
-        diffs = rearrange(samples, "n d -> n () d") - rearrange(
-            means, "c d -> () c d"
-        )
-        dists = -(diffs ** 2).sum(dim=-1)
+        diffs = rearrange(samples, "n d -> n () d") - rearrange(means, "c d -> () c d")
+        dists = -(diffs**2).sum(dim=-1)
 
         buckets = dists.max(dim=-1).indices
         bins = torch.bincount(buckets, minlength=num_clusters)
@@ -181,7 +182,7 @@ def orthogonal_loss_fn(t):
     normed_codes = l2norm(t)
     identity = jnp.eye(n)
     cosine_sim = einsum("i d, j d -> i j", normed_codes, normed_codes)
-    return ((cosine_sim - identity) ** 2).sum() / (n ** 2)
+    return ((cosine_sim - identity) ** 2).sum() / (n**2)
 
 
 class EuclideanCodebook(nn.Module):
@@ -210,11 +211,15 @@ class EuclideanCodebook(nn.Module):
     threshold_ema_dead_code: int = 2
 
     def setup(self):
-        init_fn: tp.Union[tp.Callable[..., jnp.ndarray], tp.Any] = uniform_init() if not self.kmeans_init else nn.initializers.zeros
+        init_fn: tp.Union[tp.Callable[..., jnp.ndarray], tp.Any] = (
+            uniform_init() if not self.kmeans_init else nn.initializers.zeros
+        )
         self.embed = self.param("embed", init_fn, (self.codebook_size, self.dim))
-        self.embed_avg = self.param("embed_avg", init_fn, (self.codebook_size, self.dim))
+        self.embed_avg = self.param(
+            "embed_avg", init_fn, (self.codebook_size, self.dim)
+        )
         self.inited = jnp.array([not self.kmeans_init])
-        self.cluster_size  = jnp.zeros(self.codebook_size)
+        self.cluster_size = jnp.zeros(self.codebook_size)
         super().setup()
 
     # @torch.jit.ignore
@@ -293,7 +298,9 @@ class EuclideanCodebook(nn.Module):
 
         embed_ind = self.quantize(x)
         # embed_onehot = F.one_hot(embed_ind, self.codebook_size).type(dtype)
-        embed_onehot = onehot(labels=embed_ind, num_classes=self.codebook_size).astype(dtype)
+        embed_onehot = onehot(labels=embed_ind, num_classes=self.codebook_size).astype(
+            dtype
+        )
         embed_ind = self.postprocess_emb(embed_ind, shape)
         quantize = self.dequantize(embed_ind)
 
@@ -347,7 +354,7 @@ class VectorQuantization(nn.Module):
     kmeans_iters: int = 10
     threshold_ema_dead_code: int = 2
     channels_last: int = 0  # bool
-    commitment_weight: float = 1.
+    commitment_weight: float = 1.0
     orthogonal_reg_weight: float = 0.0
     orthogonal_reg_active_codes_only: int = 0  # bool
     orthogonal_reg_max_codes: tp.Optional[int] = None
@@ -356,13 +363,20 @@ class VectorQuantization(nn.Module):
         _codebook_dim: int = default(self.codebook_dim, self.dim)
 
         requires_projection = _codebook_dim != self.dim
-        self.project_in = (nn.Dense(_codebook_dim) if requires_projection else lambda x: x)
-        self.project_out = (nn.Dense(self.dim) if requires_projection else lambda x: x)
+        self.project_in = (
+            nn.Dense(_codebook_dim) if requires_projection else lambda x: x
+        )
+        self.project_out = nn.Dense(self.dim) if requires_projection else lambda x: x
 
-        self._codebook = EuclideanCodebook(dim=_codebook_dim, codebook_size=self.codebook_size,
-                                           kmeans_init=self.kmeans_init, kmeans_iters=self.kmeans_iters,
-                                           decay=self.decay, epsilon=self.epsilon,
-                                           threshold_ema_dead_code=self.threshold_ema_dead_code)
+        self._codebook = EuclideanCodebook(
+            dim=_codebook_dim,
+            codebook_size=self.codebook_size,
+            kmeans_init=self.kmeans_init,
+            kmeans_iters=self.kmeans_iters,
+            decay=self.decay,
+            epsilon=self.epsilon,
+            threshold_ema_dead_code=self.threshold_ema_dead_code,
+        )
 
     @property
     def codebook(self):
@@ -420,9 +434,12 @@ class VectorQuantization(nn.Module):
                     codebook = codebook[unique_code_ids]
 
                 num_codes = codebook.shape[0]
-                if exists(self.orthogonal_reg_max_codes) and num_codes > self.orthogonal_reg_max_codes:
+                if (
+                    exists(self.orthogonal_reg_max_codes)
+                    and num_codes > self.orthogonal_reg_max_codes
+                ):
                     rand_ids = random.choice(
-                        self.make_rng('rng_stream'),
+                        self.make_rng("rng_stream"),
                         num_codes,
                         shape=(self.orthogonal_reg_max_codes,),
                         replace=False,
@@ -443,6 +460,7 @@ class ResidualVectorQuantization(nn.Module):
 
     Follows Algorithm 1. in https://arxiv.org/pdf/2107.03312.pdf
     """
+
     num_quantizers: int
     vector_quantization: tp.Callable
 
@@ -518,6 +536,7 @@ class ResidualVectorQuantizer(BaseQuantizer):
         orthogonal_reg_max_codes (optional int): Maximum number of codes to consider.
             for orthogonal regularization.
     """
+
     dimension: int = 256
     n_q: int = 8
     q_dropout: int = 0  # bool
@@ -531,7 +550,8 @@ class ResidualVectorQuantizer(BaseQuantizer):
     orthogonal_reg_max_codes: tp.Optional[int] = None
 
     def setup(self):
-        vector_quantization = lambda: VectorQuantization(dim=self.dimension,
+        vector_quantization = lambda: VectorQuantization(
+            dim=self.dimension,
             codebook_size=self.bins,
             decay=self.decay,
             kmeans_init=self.kmeans_init,
@@ -543,15 +563,16 @@ class ResidualVectorQuantizer(BaseQuantizer):
             channels_last=False,
         )
         self.vq = ResidualVectorQuantization(
-            num_quantizers=self.n_q,
-            vector_quantization=vector_quantization
+            num_quantizers=self.n_q, vector_quantization=vector_quantization
         )
 
     # todo: set train=True for default
     def __call__(self, x: jnp.ndarray, frame_rate: int, train=False):
         n_q = self.n_q
         if train and self.q_dropout:
-            n_q = random.randint(self.make_rng('rng_stream'), shape=(1,), minval=1, maxval=self.n_q+1)
+            n_q = random.randint(
+                self.make_rng("rng_stream"), shape=(1,), minval=1, maxval=self.n_q + 1
+            )
         bw_per_q = jnp.log2(self.bins) * frame_rate / 1000
         quantized, codes, commit_loss = self.vq(x, n_q=n_q)
         # codes = codes.transpose(0, 1)

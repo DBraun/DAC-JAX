@@ -17,12 +17,14 @@ def streamable(torch_params, prefix: str):
     return {
         "NormConv1d_0": {
             "WeightNorm_0": {
-                "Conv_0/kernel/scale": torch_params[f"{prefix}.conv.conv.weight_g"].squeeze((1, 2)),
+                "Conv_0/kernel/scale": torch_params[
+                    f"{prefix}.conv.conv.weight_g"
+                ].squeeze((1, 2)),
             },
             "Conv_0": {
                 "bias": torch_params[f"{prefix}.conv.conv.bias"],
-                "kernel": torch_params[f"{prefix}.conv.conv.weight_v"].T
-            }
+                "kernel": torch_params[f"{prefix}.conv.conv.weight_v"].T,
+            },
         }
     }
 
@@ -31,12 +33,14 @@ def streamable_transpose(torch_params, prefix: str):
     return {
         "NormConvTranspose1d_0": {
             "WeightNorm_0": {
-                "ConvTranspose_0/kernel/scale": torch_params[f"{prefix}.convtr.convtr.weight_g"].squeeze((1, 2)),
+                "ConvTranspose_0/kernel/scale": torch_params[
+                    f"{prefix}.convtr.convtr.weight_g"
+                ].squeeze((1, 2)),
             },
             "ConvTranspose_0": {
                 "bias": torch_params[f"{prefix}.convtr.convtr.bias"],
                 "kernel": torch_params[f"{prefix}.convtr.convtr.weight_v"].T,
-            }
+            },
         }
     }
 
@@ -59,35 +63,36 @@ def lstm(torch_params, prefix: str, i: int):
     bias_i, bias_f, bias_g, bias_o = jnp.split(bias, 4)
 
     return {
-        'hi': {
-            'bias': bias_i,
-            'kernel': kernel_hi,
+        "hi": {
+            "bias": bias_i,
+            "kernel": kernel_hi,
         },
-        'hf': {
-            'bias': bias_f,
-            'kernel': kernel_hf,
+        "hf": {
+            "bias": bias_f,
+            "kernel": kernel_hf,
         },
-        'hg': {
-            'bias': bias_g,
-            'kernel': kernel_hg,
+        "hg": {
+            "bias": bias_g,
+            "kernel": kernel_hg,
         },
-        'ho': {
-            'bias': bias_o,
-            'kernel': kernel_ho,
+        "ho": {
+            "bias": bias_o,
+            "kernel": kernel_ho,
         },
-        'ii': {
-            'kernel': kernel_ii,
+        "ii": {
+            "kernel": kernel_ii,
         },
-        'if': {
-            'kernel': kernel_if,
+        "if": {
+            "kernel": kernel_if,
         },
-        'ig': {
-            'kernel': kernel_ig,
+        "ig": {
+            "kernel": kernel_ig,
         },
-        'io': {
-            'kernel': kernel_io,
+        "io": {
+            "kernel": kernel_io,
         },
     }
+
 
 def torch_to_encoder(torch_params: dict, encoder_rates: tuple[int] = None):
     d = {}
@@ -95,31 +100,37 @@ def torch_to_encoder(torch_params: dict, encoder_rates: tuple[int] = None):
     i = 0
     j = 0
     for _ in range(len(encoder_rates)):
-        d[f'StreamableConv1d_{i}'] = streamable(torch_params, f'encoder.model.{j}')
+        d[f"StreamableConv1d_{i}"] = streamable(torch_params, f"encoder.model.{j}")
         j += 1
-        d[f'SEANetResnetBlock_{i}'] = {
-            f'StreamableConv1d_0': streamable(torch_params, f'encoder.model.{j}.block.1'),
-            f'StreamableConv1d_1': streamable(torch_params, f'encoder.model.{j}.block.3'),
+        d[f"SEANetResnetBlock_{i}"] = {
+            f"StreamableConv1d_0": streamable(
+                torch_params, f"encoder.model.{j}.block.1"
+            ),
+            f"StreamableConv1d_1": streamable(
+                torch_params, f"encoder.model.{j}.block.3"
+            ),
         }
         i += 1
         j += 2
 
-    d[f'StreamableConv1d_{i}'] = streamable(torch_params, f'encoder.model.{j}')
+    d[f"StreamableConv1d_{i}"] = streamable(torch_params, f"encoder.model.{j}")
 
     j += 1
     assert j == 13  # todo: remove
     lstm_layers = 2  # todo:
-    d[f'StreamableLSTM_0'] = {
-        f'LSTMCell_{k}': lstm(torch_params,f"encoder.model.{j}", k) for k in range(lstm_layers)
+    d[f"StreamableLSTM_0"] = {
+        f"LSTMCell_{k}": lstm(torch_params, f"encoder.model.{j}", k)
+        for k in range(lstm_layers)
     }
     j += lstm_layers
 
     i += 1
     assert i == 5  # todo: remove
     assert j == 15  # todo: remove
-    d[f'StreamableConv1d_{i}'] = streamable(torch_params, f'encoder.model.{j}')
+    d[f"StreamableConv1d_{i}"] = streamable(torch_params, f"encoder.model.{j}")
 
     return d
+
 
 def torch_to_decoder(torch_params: dict, decoder_rates: tuple[int] = None):
     d = {}
@@ -127,46 +138,59 @@ def torch_to_decoder(torch_params: dict, decoder_rates: tuple[int] = None):
     i = 0
     j = 0
 
-    d[f'StreamableConv1d_{i}'] = streamable(torch_params, f'decoder.model.{j}')
+    d[f"StreamableConv1d_{i}"] = streamable(torch_params, f"decoder.model.{j}")
     j += 1
     lstm_layers = 2  # todo:
-    d[f'StreamableLSTM_0'] = {
-        f'LSTMCell_{k}': lstm(torch_params,f"decoder.model.{j}", k) for k in range(lstm_layers)
+    d[f"StreamableLSTM_0"] = {
+        f"LSTMCell_{k}": lstm(torch_params, f"decoder.model.{j}", k)
+        for k in range(lstm_layers)
     }
     j += lstm_layers
     assert j == 3  # todo: remove
     for k in range(len(decoder_rates)):
-        d[f'StreamableConvTranspose1d_{i}'] = streamable_transpose(torch_params, f'decoder.model.{j}')
+        d[f"StreamableConvTranspose1d_{i}"] = streamable_transpose(
+            torch_params, f"decoder.model.{j}"
+        )
         j += 1
-        d[f'SEANetResnetBlock_{i}'] = {
-            f'StreamableConv1d_0': streamable(torch_params, f'decoder.model.{j}.block.1'),
-            f'StreamableConv1d_1': streamable(torch_params, f'decoder.model.{j}.block.3'),
+        d[f"SEANetResnetBlock_{i}"] = {
+            f"StreamableConv1d_0": streamable(
+                torch_params, f"decoder.model.{j}.block.1"
+            ),
+            f"StreamableConv1d_1": streamable(
+                torch_params, f"decoder.model.{j}.block.3"
+            ),
         }
         i += 1
         j += 2
 
     assert j == 15  # todo: remove
-    d[f'StreamableConv1d_1'] = streamable(torch_params, f'decoder.model.{j}')
+    d[f"StreamableConv1d_1"] = streamable(torch_params, f"decoder.model.{j}")
 
     return d
 
+
 def torch_to_quantizer(torch_params: dict, n_quantizers):
     d = {
-        f'layers_{i}': {'_codebook': {
-            'embed': torch_params[f'quantizer.vq.layers.{i}._codebook.embed'],
-            'embed_avg': torch_params[f'quantizer.vq.layers.{i}._codebook.embed_avg'],
-        }} for i in range(n_quantizers)
+        f"layers_{i}": {
+            "_codebook": {
+                "embed": torch_params[f"quantizer.vq.layers.{i}._codebook.embed"],
+                "embed_avg": torch_params[
+                    f"quantizer.vq.layers.{i}._codebook.embed_avg"
+                ],
+            }
+        }
+        for i in range(n_quantizers)
     }
 
-    return {
-        'vq': d
-    }
+    return {"vq": d}
 
-def torch_to_linen(torch_params: dict,
-                   encoder_rates: tuple[int] = None,
-                   decoder_rates: tuple[int] = None,
-                   n_codebooks: int = 9
-                   ) -> dict:
+
+def torch_to_linen(
+    torch_params: dict,
+    encoder_rates: tuple[int] = None,
+    decoder_rates: tuple[int] = None,
+    n_codebooks: int = 9,
+) -> dict:
     """Convert PyTorch parameters to Linen nested dictionaries"""
 
     if encoder_rates is None:
@@ -174,11 +198,11 @@ def torch_to_linen(torch_params: dict,
     if decoder_rates is None:
         decoder_rates = [8, 8, 4, 2]
 
-    return {'params':
-        {
-            'encoder': torch_to_encoder(torch_params, encoder_rates=encoder_rates),
-            'decoder': torch_to_decoder(torch_params, decoder_rates=decoder_rates),
-            'quantizer': torch_to_quantizer(torch_params, n_codebooks)
+    return {
+        "params": {
+            "encoder": torch_to_encoder(torch_params, encoder_rates=encoder_rates),
+            "decoder": torch_to_decoder(torch_params, decoder_rates=decoder_rates),
+            "quantizer": torch_to_quantizer(torch_params, n_codebooks),
         }
     }
 
@@ -189,22 +213,22 @@ def run_jax_model(np_data):
     torch_params = np.load(load_path, allow_pickle=allow_pickle)
     torch_params = torch_params.item()
 
-    kwargs  = {
+    kwargs = {
         "channels": 1,
         "dimension": 128,
         "n_filters": 64,
         "n_residual_layers": 1,
         "ratios": [8, 5, 4, 4],
-        "activation": 'elu',
-        "activation_params": {'alpha': 1.0},
-        "norm": 'weight_norm',
+        "activation": "elu",
+        "activation_params": {"alpha": 1.0},
+        "norm": "weight_norm",
         "norm_params": {},
         "kernel_size": 7,
         "last_kernel_size": 7,
         "residual_kernel_size": 3,
         "dilation_base": 2,
         "causal": False,
-        "pad_mode": 'constant',
+        "pad_mode": "constant",
         "true_skip": True,
         "compress": 2,
         "lstm": 2,
@@ -248,12 +272,14 @@ def run_jax_model(np_data):
 
     x = jnp.array(np_data)
 
-    print(encodec_model.tabulate(
-        {"params": random.key(0), "rng_stream": random.key(0)},
-        x,
-        console_kwargs={"width": 300},
-        depth=3,
-    ))
+    print(
+        encodec_model.tabulate(
+            {"params": random.key(0), "rng_stream": random.key(0)},
+            x,
+            console_kwargs={"width": 300},
+            depth=3,
+        )
+    )
 
     variables = encodec_model.init(
         {"params": random.key(0), "rng_stream": random.key(0)},
@@ -265,15 +291,17 @@ def run_jax_model(np_data):
         torch_params,
         encodec_model.encoder.ratios,
         encodec_model.decoder.ratios,
-        encodec_model.num_codebooks
+        encodec_model.num_codebooks,
     )
     params_from_torch = variables_from_torch["params"]
 
     pass
-    result = encodec_model.apply({'params': params_from_torch}, x, rngs={'rng_stream': random.key(0)})
+    result = encodec_model.apply(
+        {"params": params_from_torch}, x, rngs={"rng_stream": random.key(0)}
+    )
     recons = result.x
     codes = result.codes
-    print('all done!')
+    print("all done!")
 
     return np.array(recons), np.array(codes)
 
@@ -283,7 +311,7 @@ def run_torch_model(np_data):
     from audiocraft.models import MusicGen
 
     # Using small model, better results would be obtained with `medium` or `large`.
-    model = MusicGen.get_pretrained('facebook/musicgen-small')
+    model = MusicGen.get_pretrained("facebook/musicgen-small")
     x = torch.from_numpy(np_data).cuda()
     result = model.compression_model(x)
 
@@ -293,9 +321,11 @@ def run_torch_model(np_data):
     return recons, codes
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
-    np_data, sr = librosa.load(Path(__file__).parent / 'assets/60013__qubodup__whoosh.flac', sr=None, mono=True)
+    np_data, sr = librosa.load(
+        Path(__file__).parent / "assets/60013__qubodup__whoosh.flac", sr=None, mono=True
+    )
     np_data = np.expand_dims(np.array(np_data), 0)
     np_data = np.expand_dims(np.array(np_data), 0)
     np_data = np.concatenate([np_data, np_data, np_data, np_data], axis=-1)
