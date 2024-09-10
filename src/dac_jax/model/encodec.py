@@ -381,6 +381,7 @@ class SEANetDecoder(nn.Module):
             layers += [final_act(**final_activation_params)]
         model = nn.Sequential(layers)
         y = model(z)
+        y = rearrange(y, "B T C -> B C T")
         return y
 
 
@@ -427,6 +428,14 @@ class CompressionModel(ABC, nn.Module):
     @property
     @abstractmethod
     def num_codebooks(self) -> int: ...
+
+    @property
+    def n_codebooks(self):
+        return self.num_codebooks
+
+    @property
+    def codebook_size(self):
+        return self.cardinality
 
     @property
     @abstractmethod
@@ -520,8 +529,6 @@ class EncodecModel(CompressionModel):
         q_res = self.quantizer(emb, self.frame_rate, train=train)
         out = self.decoder(q_res.x)
 
-        out = rearrange(out, "B T C -> B C T")
-
         # remove extra padding added by the encoder and decoder
         assert out.shape[-1] >= length, (out.shape[-1], length)
         out = out[..., :length]
@@ -544,6 +551,7 @@ class EncodecModel(CompressionModel):
         assert x.ndim == 3
         x, scale = self.preprocess(x)
         emb = self.encoder(x)
+        emb = emb.transpose(0, 2, 1)
         codes = self.quantizer.encode(emb)
         return codes, scale
 

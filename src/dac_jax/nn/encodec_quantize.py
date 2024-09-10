@@ -258,7 +258,7 @@ class EuclideanCodebook(nn.Module):
         return jnp.reshape(embed_ind, shape[:-1])
 
     def dequantize(self, embed_ind):
-        quantize = self.embed[embed_ind]
+        quantize = jnp.take(self.embed, embed_ind, axis=0)
         return quantize
 
     def encode(self, x):
@@ -571,14 +571,14 @@ class ResidualVectorQuantizer(BaseQuantizer):
         """
         n_q = self.n_q
         codes = self.vq.encode(x, n_q=n_q)
-        codes = codes.transpose(0, 1)
+        codes = codes.transpose(1, 0, 2)
         # codes is [B, K, T], with T frames, K nb of codebooks.
         return codes
 
     def decode(self, codes: jnp.ndarray) -> jnp.ndarray:
         """Decode the given codes to the quantized representation."""
         # codes is [B, K, T], with T frames, K nb of codebooks, vq.decode expects [K, B, T].
-        codes = codes.transpose(0, 1)
+        codes = codes.transpose(1, 0, 2)
         quantized = self.vq.decode(codes)
         return quantized
 
