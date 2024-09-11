@@ -86,7 +86,7 @@ Here we use DAC-JAX as a "[bound](https://flax.readthedocs.io/en/latest/develope
 
 ```python
 import dac_jax
-from dac_jax.audio_utils import volume_norm, db2linear
+from dac_jax import DACFile
 
 import jax.numpy as jnp
 import librosa
@@ -102,18 +102,17 @@ signal = jnp.array(signal, dtype=jnp.float32)
 while signal.ndim < 3:
     signal = jnp.expand_dims(signal, axis=0)
 
-target_db = -16  # Normalize audio to -16 dB
-x, input_db = volume_norm(signal, target_db, sample_rate)
-
 # Encode audio signal as one long file (may run out of GPU memory on long files)
-x = model.preprocess(x, sample_rate)
-z, codes, latents, commitment_loss, codebook_loss = model.encode(x, train=False)
+dac_file = model.encode_to_dac(signal, sample_rate)
+
+# Save to a file
+dac_file.save("dac_file_001.dac")
+
+# Load a file
+dac_file = DACFile.load("dac_file_001.dac")
 
 # Decode audio signal
-y = model.decode(z, length=signal.shape[-1])
-
-# Undo previous loudness normalization
-y = y * db2linear(input_db - target_db)
+y = model.decode(dac_file)
 
 # Calculate mean-square error of reconstruction in time-domain
 mse = jnp.square(y-signal).mean()

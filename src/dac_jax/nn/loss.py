@@ -10,27 +10,27 @@ import numpy as np
 from dac_jax.audio_utils import stft, decibel_loudness, mel_spectrogram
 
 
-def l1_loss(y_true: jnp.ndarray,
-            y_pred: jnp.ndarray,
-            reduction='mean') -> jnp.ndarray:
+def l1_loss(y_true: jnp.ndarray, y_pred: jnp.ndarray, reduction="mean") -> jnp.ndarray:
 
     errors = jnp.abs(y_pred - y_true)
-    if reduction == 'none':
+    if reduction == "none":
         return errors
-    elif reduction == 'mean':
+    elif reduction == "mean":
         return jnp.mean(errors)
-    elif reduction == 'sum':
+    elif reduction == "sum":
         return jnp.sum(errors)
     else:
         raise ValueError(f"Invalid reduction method: {reduction}")
 
 
-def sisdr_loss(y_true: jnp.ndarray,
-               y_pred: jnp.ndarray,
-               scaling: int = True,
-               reduction: str = 'mean',
-               zero_mean: int = True,
-               clip_min: int = None):
+def sisdr_loss(
+    y_true: jnp.ndarray,
+    y_pred: jnp.ndarray,
+    scaling: int = True,
+    reduction: str = "mean",
+    zero_mean: int = True,
+    clip_min: int = None,
+):
     """
     Computes the Scale-Invariant Source-to-Distortion Ratio between a batch
     of estimated and reference audio signals or aligned features.
@@ -136,7 +136,7 @@ def generator_loss(fake, real):
     loss_feature = 0
 
     for i in range(len(d_fake)):
-        for j in range(len(d_fake[i])-1):
+        for j in range(len(d_fake[i]) - 1):
             loss_feature = loss_feature + l1_loss(d_fake[i][j], d_real[i][j])
 
     # We normalize based on the number of feature maps, but the original DAC doesn't do this.
@@ -145,17 +145,18 @@ def generator_loss(fake, real):
     return loss_g, loss_feature
 
 
-def multiscale_stft_loss(y_true: jnp.ndarray,
-                         y_pred: jnp.ndarray,
-                         window_lengths=None,
-                         loss_fn: Callable = l1_loss,
-                         clamp_eps: float = 1e-5,
-                         mag_weight: float = 1.0,
-                         log_weight: float = 1.0,
-                         pow: float = 2.0,
-                         match_stride: Optional[bool] = False,
-                         window: str = 'hann'
-                         ):
+def multiscale_stft_loss(
+    y_true: jnp.ndarray,
+    y_pred: jnp.ndarray,
+    window_lengths=None,
+    loss_fn: Callable = l1_loss,
+    clamp_eps: float = 1e-5,
+    mag_weight: float = 1.0,
+    log_weight: float = 1.0,
+    pow: float = 2.0,
+    match_stride: Optional[bool] = False,
+    window: str = "hann",
+):
     """Computes the multiscale STFT loss from [1].
 
     Parameters
@@ -210,33 +211,41 @@ def multiscale_stft_loss(y_true: jnp.ndarray,
         window_lengths = [2048, 512]
 
     for frame_length in window_lengths:
-        stft_fun = partial(stft, frame_length=frame_length, hop_factor=0.25, window=window,
-                           match_stride=match_stride)
+        stft_fun = partial(
+            stft,
+            frame_length=frame_length,
+            hop_factor=0.25,
+            window=window,
+            match_stride=match_stride,
+        )
         x_stft = stft_fun(x)
         y_stft = stft_fun(y)
 
-        loss = loss + log_weight * loss_fn(decibel_loudness(x_stft, clamp_eps=clamp_eps, pow=pow),
-                                           decibel_loudness(y_stft, clamp_eps=clamp_eps, pow=pow))
+        loss = loss + log_weight * loss_fn(
+            decibel_loudness(x_stft, clamp_eps=clamp_eps, pow=pow),
+            decibel_loudness(y_stft, clamp_eps=clamp_eps, pow=pow),
+        )
         loss = loss + mag_weight * loss_fn(jnp.abs(x_stft), jnp.abs(y_stft))
 
     return loss
 
 
-def mel_spectrogram_loss(y_true: jnp.ndarray,
-                         y_pred: jnp.ndarray,
-                         sample_rate: int,
-                         n_mels=None,
-                         window_lengths=None,
-                         loss_fn: Callable = l1_loss,
-                         clamp_eps: float = 1e-5,
-                         mag_weight: float = 1.0,
-                         log_weight: float = 1.0,
-                         pow: float = 2.0,
-                         match_stride: Optional[bool] = False,
-                         lower_edge_hz=None,
-                         upper_edge_hz=None,
-                         window: str = 'hann',
-                         ):
+def mel_spectrogram_loss(
+    y_true: jnp.ndarray,
+    y_pred: jnp.ndarray,
+    sample_rate: int,
+    n_mels=None,
+    window_lengths=None,
+    loss_fn: Callable = l1_loss,
+    clamp_eps: float = 1e-5,
+    mag_weight: float = 1.0,
+    log_weight: float = 1.0,
+    pow: float = 2.0,
+    match_stride: Optional[bool] = False,
+    lower_edge_hz=None,
+    upper_edge_hz=None,
+    window: str = "hann",
+):
     """Compute distance between mel spectrograms. Can be used in a multiscale way.
 
     Parameters
@@ -293,7 +302,7 @@ def mel_spectrogram_loss(y_true: jnp.ndarray,
         window_lengths = [2048, 512]
 
     if lower_edge_hz is None:
-        lower_edge_hz = [0., 0.]
+        lower_edge_hz = [0.0, 0.0]
 
     if upper_edge_hz is None:
         upper_edge_hz = [None, None]  # librosa converts None to sample_rate/2
@@ -302,12 +311,19 @@ def mel_spectrogram_loss(y_true: jnp.ndarray,
         return jnp.log10(jnp.pow(jnp.maximum(mels, clamp_eps), pow))
 
     loss = jnp.zeros(())
-    for features, fmin, fmax, frame_length in zip(n_mels, lower_edge_hz, upper_edge_hz, window_lengths):
+    for features, fmin, fmax, frame_length in zip(
+        n_mels, lower_edge_hz, upper_edge_hz, window_lengths
+    ):
 
         def spectrogram_fn(signal):
-            stft_data = stft(signal, frame_length=frame_length, hop_factor=0.25, window=window,
-                             match_stride=match_stride)
-            stft_data = rearrange(stft_data, 'b c nf nt -> (b c) nt nf')
+            stft_data = stft(
+                signal,
+                frame_length=frame_length,
+                hop_factor=0.25,
+                window=window,
+                match_stride=match_stride,
+            )
+            stft_data = rearrange(stft_data, "b c nf nt -> (b c) nt nf")
 
             spectrogram = jnp.abs(stft_data)
             return spectrogram
@@ -317,8 +333,15 @@ def mel_spectrogram_loss(y_true: jnp.ndarray,
 
         nf = x_spectrogram.shape[-1]
 
-        mel_fun = partial(mel_spectrogram, log_scale=False, sample_rate=sample_rate, frame_length=2 * (nf - 1),
-                          num_features=features, lower_edge_hertz=fmin, upper_edge_hertz=fmax)
+        mel_fun = partial(
+            mel_spectrogram,
+            log_scale=False,
+            sample_rate=sample_rate,
+            frame_length=2 * (nf - 1),
+            num_features=features,
+            lower_edge_hertz=fmin,
+            upper_edge_hertz=fmax,
+        )
 
         x_mels = mel_fun(x_spectrogram)
         y_mels = mel_fun(y_spectrogram)
@@ -329,11 +352,12 @@ def mel_spectrogram_loss(y_true: jnp.ndarray,
     return loss
 
 
-def phase_loss(y_true: jnp.ndarray,
-               y_pred: jnp.ndarray,
-               window_length: int = 2048,
-               hop_factor: float = 0.25,
-               ):
+def phase_loss(
+    y_true: jnp.ndarray,
+    y_pred: jnp.ndarray,
+    window_length: int = 2048,
+    hop_factor: float = 0.25,
+):
     """Computes phase loss between an estimate and a reference signal.
 
     Parameters
@@ -359,7 +383,9 @@ def phase_loss(y_true: jnp.ndarray,
     x = y_pred
     y = y_true
 
-    stft_fun = partial(stft, frame_length=window_length, hop_factor=hop_factor, window='hann')
+    stft_fun = partial(
+        stft, frame_length=window_length, hop_factor=hop_factor, window="hann"
+    )
 
     x_stft = stft_fun(x)
     y_stft = stft_fun(y)

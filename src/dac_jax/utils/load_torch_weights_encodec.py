@@ -172,7 +172,7 @@ def torch_to_linen(
     torch_params: dict,
     encoder_rates: tuple[int] = None,
     decoder_rates: tuple[int] = None,
-    n_codebooks: int = 9,
+    num_codebooks: int = 9,
 ) -> dict:
     """Convert PyTorch parameters to Linen nested dictionaries"""
 
@@ -185,6 +185,6 @@ def torch_to_linen(
         "params": {
             "encoder": torch_to_encoder(torch_params, encoder_rates=encoder_rates),
             "decoder": torch_to_decoder(torch_params, decoder_rates=decoder_rates),
-            "quantizer": torch_to_quantizer(torch_params, n_codebooks),
+            "quantizer": torch_to_quantizer(torch_params, num_codebooks),
         }
     }

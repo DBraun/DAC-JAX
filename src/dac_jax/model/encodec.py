@@ -4,7 +4,6 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from abc import ABC, abstractmethod
 from dataclasses import field
 import typing as tp
 
@@ -12,6 +11,8 @@ from einops import rearrange
 from flax import linen as nn
 from jax import numpy as jnp
 import numpy as np
+
+from dac_jax.model.core import CompressionModel
 
 from dac_jax.nn.encodec_layers import (
     StreamableConv1d,
@@ -385,68 +386,6 @@ class SEANetDecoder(nn.Module):
         return y
 
 
-class CompressionModel(ABC, nn.Module):
-    """Base API for all compression models that aim at being used as audio tokenizers
-    with a language model.
-    """
-
-    @abstractmethod
-    def __call__(self, x: jnp.ndarray):  # todo: -> qt.QuantizedResult:
-        ...
-
-    @abstractmethod
-    def encode(self, x: jnp.ndarray) -> tp.Tuple[jnp.ndarray, tp.Optional[jnp.ndarray]]:
-        """See `EncodecModel.encode`."""
-        ...
-
-    @abstractmethod
-    def decode(self, codes: jnp.ndarray, scale: tp.Optional[jnp.ndarray] = None):
-        """See `EncodecModel.decode`."""
-        ...
-
-    @abstractmethod
-    def decode_latent(self, codes: jnp.ndarray):
-        """Decode from the discrete codes to continuous latent space."""
-        ...
-
-    @property
-    @abstractmethod
-    def channels(self) -> int: ...
-
-    @property
-    @abstractmethod
-    def frame_rate(self) -> float: ...
-
-    @property
-    @abstractmethod
-    def sample_rate(self) -> int: ...
-
-    @property
-    @abstractmethod
-    def cardinality(self) -> int: ...
-
-    @property
-    @abstractmethod
-    def num_codebooks(self) -> int: ...
-
-    @property
-    def n_codebooks(self):
-        return self.num_codebooks
-
-    @property
-    def codebook_size(self):
-        return self.cardinality
-
-    @property
-    @abstractmethod
-    def total_codebooks(self) -> int: ...
-
-    @abstractmethod
-    def set_num_codebooks(self, n: int):
-        """Set the active number of codebooks used by the quantizer."""
-        ...
-
-
 class EncodecModel(CompressionModel):
     """Encodec model operating on the raw waveform.
 
@@ -527,17 +466,19 @@ class EncodecModel(CompressionModel):
 
         emb = self.encoder(x)
         q_res = self.quantizer(emb, self.frame_rate, train=train)
-        out = self.decoder(q_res.x)
+        out = self.decoder(q_res.z)
 
         # remove extra padding added by the encoder and decoder
         assert out.shape[-1] >= length, (out.shape[-1], length)
         out = out[..., :length]
 
-        q_res.x = self.postprocess(out, scale)
+        q_res.recons = self.postprocess(out, scale)
 
         return q_res
 
-    def encode(self, x: jnp.ndarray) -> tp.Tuple[jnp.ndarray, tp.Optional[jnp.ndarray]]:
+    def encode(
+        self, x: jnp.ndarray, n_quantizers: int = None, train=False
+    ) -> tp.Tuple[jnp.ndarray, tp.Optional[jnp.ndarray]]:
         """Encode the given input tensor to quantized representation along with scale parameter.
 
         Args:
@@ -552,7 +493,7 @@ class EncodecModel(CompressionModel):
         x, scale = self.preprocess(x)
         emb = self.encoder(x)
         emb = emb.transpose(0, 2, 1)
-        codes = self.quantizer.encode(emb)
+        codes = self.quantizer.encode(emb, n_quantizers, train=train)
         return codes, scale
 
     def decode(self, codes: jnp.ndarray, scale: tp.Optional[jnp.ndarray] = None):

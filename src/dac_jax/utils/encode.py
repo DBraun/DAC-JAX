@@ -11,7 +11,9 @@ import jax.numpy as jnp
 from dac_jax import load_model
 from dac_jax.audio_utils import find_audio
 
-warnings.filterwarnings("ignore", category=UserWarning)  # ignore librosa warnings related to mel bins
+warnings.filterwarnings(
+    "ignore", category=UserWarning
+)  # ignore librosa warnings related to mel bins
 
 
 @jax.jit
@@ -66,17 +68,23 @@ def encode(
 
     @jax.jit
     def compress_chunk(x):
-        return model.apply(variables, x, method='compress_chunk')
+        return model.apply(variables, x, method="compress_chunk")
 
-    for audio_file in tqdm(audio_files, desc='Encoding files'):
+    for audio_file in tqdm(audio_files, desc="Encoding files"):
         # Load file with original sample rate
         signal, sample_rate = librosa.load(audio_file, sr=None, mono=False)
         while signal.ndim < 3:
             signal = jnp.expand_dims(signal, axis=0)
 
         # Encode audio to .dac format
-        dac_file = model.compress(compress_chunk, signal, sample_rate, win_duration=win_duration, verbose=verbose,
-                                  n_quantizers=n_quantizers)
+        dac_file = model.compress(
+            compress_chunk,
+            signal,
+            sample_rate,
+            win_duration=win_duration,
+            verbose=verbose,
+            n_quantizers=n_quantizers,
+        )
 
         # Compute output path
         relative_path = audio_file.relative_to(input)

@@ -1,110 +1,40 @@
+import os
+
+os.environ["XLA_FLAGS"] = (
+    " --xla_gpu_deterministic_ops=true"  # todo: https://github.com/google/flax/discussions/3382
+)
+os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 from pathlib import Path
 
 from audiocraft.models import MusicGen
-from jax import random
 from jax import numpy as jnp
+from jax import random
 import librosa
 import numpy as np
 import torch
 
-from dac_jax import EncodecModel
-from dac_jax.model.encodec import SEANetEncoder, SEANetDecoder
-from dac_jax.nn.encodec_quantize import ResidualVectorQuantizer
-from dac_jax.utils.load_torch_weights_encodec import torch_to_linen
+from dac_jax import load_encodec_model
+from dac_jax.nn.encodec_quantize import QuantizedResult
 
 
 def run_jax_model(np_data):
-    load_path = "encodec_torch_weights.npy"  # todo:
-    allow_pickle = True  # todo:
-    torch_params = np.load(load_path, allow_pickle=allow_pickle)
-    torch_params = torch_params.item()
-
-    kwargs = {
-        "channels": 1,
-        "dimension": 128,
-        "n_filters": 64,
-        "n_residual_layers": 1,
-        "ratios": [8, 5, 4, 4],
-        "activation": "elu",
-        "activation_params": {"alpha": 1.0},
-        "norm": "weight_norm",
-        "norm_params": {},
-        "kernel_size": 7,
-        "last_kernel_size": 7,
-        "residual_kernel_size": 3,
-        "dilation_base": 2,
-        "causal": False,
-        "pad_mode": "reflect",
-        "true_skip": True,
-        "compress": 2,
-        "lstm": 2,
-        "disable_norm_outer_blocks": 0,
-    }
-    encoder_override_kwargs = {}
-    decoder_override_kwargs = {
-        "trim_right_ratio": 1.0,
-        "final_activation": None,
-        "final_activation_params": None,
-    }
-    encoder_kwargs = {**kwargs, **encoder_override_kwargs}
-    decoder_kwargs = {**kwargs, **decoder_override_kwargs}
-
-    encoder = SEANetEncoder(**encoder_kwargs)
-    decoder = SEANetDecoder(**decoder_kwargs)
-    quantizer = ResidualVectorQuantizer(
-        dimension=encoder.dimension,
-        n_q=4,
-        q_dropout=False,
-        bins=2048,
-        decay=0.99,
-        kmeans_init=True,
-        kmeans_iters=50,
-        threshold_ema_dead_code=0,  # todo: set to 2 if we needed to train
-        orthogonal_reg_weight=0.0,
-        orthogonal_reg_active_codes_only=False,
-        orthogonal_reg_max_codes=None,
-    )
-
-    sample_rate = 32_000
-
-    encodec_model = EncodecModel(
-        encoder=encoder,
-        decoder=decoder,
-        quantizer=quantizer,
-        causal=False,
-        renormalize=False,
-        frame_rate=sample_rate // encoder.hop_length,
-        sample_rate=sample_rate,
-        channels=1,
-    )
 
     x = jnp.array(np_data)
 
-    variables = encodec_model.init(
-        {"params": random.key(0), "rng_stream": random.key(0)},
-        x,
-    )
-    params = variables["params"]
+    encodec_model, variables = load_encodec_model("facebook/musicgen-small")
 
-    variables_from_torch = torch_to_linen(
-        torch_params,
-        encodec_model.encoder.ratios,
-        encodec_model.decoder.ratios,
-        encodec_model.num_codebooks,
+    result: QuantizedResult = encodec_model.apply(
+        variables, x, rngs={"rng_stream": random.key(0)}
     )
-    params_from_torch = variables_from_torch["params"]
-
-    result = encodec_model.apply(
-        {"params": params_from_torch}, x, rngs={"rng_stream": random.key(0)}
-    )
-    recons = result.x
+    recons = result.recons
     codes = result.codes
 
     return np.array(recons), np.array(codes)
 
 
 def run_torch_model(np_data):
-    # Using small model, better results would be obtained with `medium` or `large`.
     model = MusicGen.get_pretrained("facebook/musicgen-small")
     x = torch.from_numpy(np_data).cuda()
     result = model.compression_model(x)

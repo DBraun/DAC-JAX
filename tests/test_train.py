@@ -1,6 +1,7 @@
 """
 Tests for CLI.
 """
+
 import os
 import shlex
 import subprocess

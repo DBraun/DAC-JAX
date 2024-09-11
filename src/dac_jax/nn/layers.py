@@ -63,7 +63,9 @@ def make_initializer(in_channels, out_channels, kernel_size, groups, mode="fan_i
         raise ValueError(f"Unexpected mode: {mode}")
     k = groups / (c * jnp.prod(jnp.array(kernel_size)))
     scale = jnp.sqrt(k)
-    return lambda key, shape, dtype: jax.random.uniform(key, shape, minval=-scale, maxval=scale, dtype=dtype)
+    return lambda key, shape, dtype: jax.random.uniform(
+        key, shape, minval=-scale, maxval=scale, dtype=dtype
+    )
 
 
 class WNConv1d(nn.Conv):
@@ -73,7 +75,9 @@ class WNConv1d(nn.Conv):
         # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
         # https://github.com/google/flax/issues/4091
         # Note: we are just ignoring whatever self.kernel_init and self.bias_init are.
-        kernel_init = jax.nn.initializers.truncated_normal(.02, lower=-2 / .02, upper=2 / .02)
+        kernel_init = jax.nn.initializers.truncated_normal(
+            0.02, lower=-2 / 0.02, upper=2 / 0.02
+        )
         bias_init = nn.initializers.zeros
 
         conv = nn.Conv(
@@ -90,9 +94,9 @@ class WNConv1d(nn.Conv):
             param_dtype=self.param_dtype,
             precision=self.precision,
             kernel_init=kernel_init,
-            bias_init=bias_init
+            bias_init=bias_init,
         )
-        scale_init = nn.initializers.constant(1/jnp.sqrt(3))
+        scale_init = nn.initializers.constant(1 / jnp.sqrt(3))
         block = nn.WeightNorm(conv, scale_init=scale_init)
         x = block(x)
         return x
@@ -120,13 +124,21 @@ class WNConvTranspose1d(nn.ConvTranspose):
         groups = 1
         # note: we just ignore whatever self.kernel_init is
         kernel_init = make_initializer(
-            x.shape[-1], self.features, self.kernel_size, groups, mode="fan_out",
+            x.shape[-1],
+            self.features,
+            self.kernel_size,
+            groups,
+            mode="fan_out",
         )
 
         if self.use_bias:
             # note: we just ignore whatever self.bias_init is
             bias_init = make_initializer(
-                x.shape[-1], self.features, self.kernel_size, groups, mode="fan_out",
+                x.shape[-1],
+                self.features,
+                self.kernel_size,
+                groups,
+                mode="fan_out",
             )
         else:
             bias_init = None
@@ -144,7 +156,7 @@ class WNConvTranspose1d(nn.ConvTranspose):
             precision=self.precision,
             kernel_init=kernel_init,
             bias_init=bias_init,
-            transpose_kernel=True  # note: this helps us load weights from PyTorch
+            transpose_kernel=True,  # note: this helps us load weights from PyTorch
         )
         scale_init = nn.initializers.constant(1 / jnp.sqrt(3))
         block = nn.WeightNorm(conv, scale_init=scale_init)
@@ -172,6 +184,6 @@ class Snake1d(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        alpha = self.param('alpha', nn.initializers.ones, (1, 1, self.channels))
+        alpha = self.param("alpha", nn.initializers.ones, (1, 1, self.channels))
         x = x + jnp.reciprocal(alpha + 1e-9) * jnp.square(jnp.sin(alpha * x))
         return x

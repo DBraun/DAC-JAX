@@ -10,7 +10,7 @@ DAC.decoder_dim: 1536
 DAC.decoder_rates: [12, 4, 4, 2, 2, 2]
 
 # Quantization
-DAC.n_codebooks: 28
+DAC.num_codebooks: 28
 DAC.codebook_size: 1024
 DAC.codebook_dim: 8
 DAC.quantizer_dropout: 1.0

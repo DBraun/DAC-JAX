@@ -21,11 +21,15 @@ from jax import random
 
 @dataclass
 class QuantizedResult:
-    x: jnp.ndarray
+    z: jnp.ndarray
     codes: jnp.ndarray
     bandwidth: jnp.ndarray  # bandwidth in kb/s used, per batch item.
     penalty: tp.Optional[jnp.ndarray] = None
     metrics: dict = field(default_factory=dict)
+    latents: tp.Optional[jnp.ndarray] = None
+    commitment_loss: tp.Optional[jnp.ndarray] = None
+    codebook_loss: tp.Optional[jnp.ndarray] = None
+    recons: jnp.ndarray = None
 
 
 class BaseQuantizer(nn.Module):
@@ -41,7 +45,9 @@ class BaseQuantizer(nn.Module):
         """
         raise NotImplementedError()
 
-    def encode(self, x: jnp.ndarray) -> jnp.ndarray:
+    def encode(
+        self, x: jnp.ndarray, n_quantizers: int = None, train=False
+    ) -> jnp.ndarray:
         """Encode a given input tensor with the specified sample rate at the given bandwidth."""
         raise NotImplementedError()
 
@@ -74,7 +80,9 @@ class DummyQuantizer(BaseQuantizer):
             x, q, jnp.array(q.numel() * 32 * frame_rate / 1000 / len(x))
         )
 
-    def encode(self, x: jnp.ndarray) -> jnp.ndarray:
+    def encode(
+        self, x: jnp.ndarray, n_quantizers: int = None, train=False
+    ) -> jnp.ndarray:
         """Encode a given input tensor with the specified sample rate at the given bandwidth.
         In the case of the DummyQuantizer, the codes are actually identical
         to the input and resulting quantized representation as no quantization is done.
@@ -275,7 +283,6 @@ class EuclideanCodebook(nn.Module):
         quantize = self.dequantize(embed_ind)
         return quantize
 
-    # todo: set train=True by default
     def __call__(self, x, train=False):
         shape, dtype = x.shape, x.dtype
         x = self.preprocess(x)
@@ -381,7 +388,7 @@ class VectorQuantization(nn.Module):
             quantize = rearrange(quantize, "b n d -> b d n")
         return quantize
 
-    def encode(self, x):
+    def encode(self, x, n_quantizers: int = None, train=False):
         x = self._preprocess(x)
         x = self.project_in(x)
         embed_in = self._codebook.encode(x)
@@ -480,7 +487,9 @@ class ResidualVectorQuantization(nn.Module):
         out_losses, out_indices = map(jnp.stack, (all_losses, all_indices))
         return quantized_out, out_indices, out_losses
 
-    def encode(self, x: jnp.ndarray, n_q: tp.Optional[int] = None) -> jnp.ndarray:
+    def encode(
+        self, x: jnp.ndarray, n_q: tp.Optional[int] = None, train=False
+    ) -> jnp.ndarray:
         residual = x
         all_indices = []
         n_q = n_q or len(self.layers)
@@ -550,7 +559,6 @@ class ResidualVectorQuantizer(BaseQuantizer):
             num_quantizers=self.n_q, vector_quantization=vector_quantization
         )
 
-    # todo: set train=True for default
     def __call__(self, x: jnp.ndarray, frame_rate: int, train=False):
         n_q = self.n_q
         if train and self.q_dropout:
