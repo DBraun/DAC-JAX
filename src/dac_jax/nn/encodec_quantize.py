@@ -45,9 +45,7 @@ class BaseQuantizer(nn.Module):
         """
         raise NotImplementedError()
 
-    def encode(
-        self, x: jnp.ndarray, n_quantizers: int = None, train=False
-    ) -> jnp.ndarray:
+    def encode(self, x: jnp.ndarray) -> jnp.ndarray:
         """Encode a given input tensor with the specified sample rate at the given bandwidth."""
         raise NotImplementedError()
 
@@ -80,9 +78,7 @@ class DummyQuantizer(BaseQuantizer):
             x, q, jnp.array(q.numel() * 32 * frame_rate / 1000 / len(x))
         )
 
-    def encode(
-        self, x: jnp.ndarray, n_quantizers: int = None, train=False
-    ) -> jnp.ndarray:
+    def encode(self, x: jnp.ndarray) -> jnp.ndarray:
         """Encode a given input tensor with the specified sample rate at the given bandwidth.
         In the case of the DummyQuantizer, the codes are actually identical
         to the input and resulting quantized representation as no quantization is done.
@@ -388,7 +384,7 @@ class VectorQuantization(nn.Module):
             quantize = rearrange(quantize, "b n d -> b d n")
         return quantize
 
-    def encode(self, x, n_quantizers: int = None, train=False):
+    def encode(self, x):
         x = self._preprocess(x)
         x = self.project_in(x)
         embed_in = self._codebook.encode(x)
@@ -400,7 +396,6 @@ class VectorQuantization(nn.Module):
         quantize = self._postprocess(quantize)
         return quantize
 
-    # todo: set train=True by default
     def __call__(self, x, train=False):
         x = self._preprocess(x)
 
@@ -460,7 +455,6 @@ class ResidualVectorQuantization(nn.Module):
         self.layers = [self.vector_quantization() for _ in range(self.num_quantizers)]
         super().__init__()
 
-    # todo: set train=True by default
     @nn.compact
     def __call__(self, x, n_q: tp.Optional[int] = None, train=False):
         quantized_out = 0.0
@@ -487,9 +481,7 @@ class ResidualVectorQuantization(nn.Module):
         out_losses, out_indices = map(jnp.stack, (all_losses, all_indices))
         return quantized_out, out_indices, out_losses
 
-    def encode(
-        self, x: jnp.ndarray, n_q: tp.Optional[int] = None, train=False
-    ) -> jnp.ndarray:
+    def encode(self, x: jnp.ndarray, n_q: tp.Optional[int] = None) -> jnp.ndarray:
         residual = x
         all_indices = []
         n_q = n_q or len(self.layers)
@@ -572,12 +564,12 @@ class ResidualVectorQuantizer(BaseQuantizer):
         bw = jnp.array(n_q * bw_per_q)
         return QuantizedResult(quantized, codes, bw, penalty=jnp.mean(commit_loss))
 
-    def encode(self, x: jnp.ndarray) -> jnp.ndarray:
+    def encode(self, x: jnp.ndarray, n_q: int = None) -> jnp.ndarray:
         """Encode a given input tensor with the specified frame rate at the given bandwidth.
         The RVQ encode method sets the appropriate number of quantizer to use
         and returns indices for each quantizer.
         """
-        n_q = self.n_q
+        n_q = n_q or self.n_q
         codes = self.vq.encode(x, n_q=n_q)
         codes = codes.transpose(1, 0, 2)
         # codes is [B, K, T], with T frames, K nb of codebooks.

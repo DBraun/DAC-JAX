@@ -477,7 +477,7 @@ class EncodecModel(CompressionModel):
         return q_res
 
     def encode(
-        self, x: jnp.ndarray, n_quantizers: int = None, train=False
+        self, x: jnp.ndarray, n_quantizers: int = None
     ) -> tp.Tuple[jnp.ndarray, tp.Optional[jnp.ndarray]]:
         """Encode the given input tensor to quantized representation along with scale parameter.
 
@@ -493,10 +493,15 @@ class EncodecModel(CompressionModel):
         x, scale = self.preprocess(x)
         emb = self.encoder(x)
         emb = emb.transpose(0, 2, 1)
-        codes = self.quantizer.encode(emb, n_quantizers, train=train)
+        codes = self.quantizer.encode(emb, n_quantizers)
         return codes, scale
 
-    def decode(self, codes: jnp.ndarray, scale: tp.Optional[jnp.ndarray] = None):
+    def decode(
+        self,
+        codes: jnp.ndarray,
+        scale: tp.Optional[jnp.ndarray] = None,
+        length: int = None,
+    ):
         """Decode the given codes to a reconstructed representation, using the scale to perform
         audio denormalization if needed.
 
@@ -510,7 +515,10 @@ class EncodecModel(CompressionModel):
         emb = self.decode_latent(codes)
         out = self.decoder(emb)
         out = self.postprocess(out, scale)
-        # out contains extra padding added by the encoder and decoder
+
+        # remove extra padding added by the encoder and decoder
+        if length is not None:
+            out = out[..., :length]
         return out
 
     def decode_latent(self, codes: jnp.ndarray):

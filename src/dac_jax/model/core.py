@@ -20,7 +20,12 @@ class CompressionModel(ABC, nn.Module):
         ...
 
     @abstractmethod
-    def decode(self, codes: jnp.ndarray, scale: tp.Optional[jnp.ndarray] = None):
+    def decode(
+        self,
+        codes: jnp.ndarray,
+        scale: tp.Optional[jnp.ndarray] = None,
+        length: int = None,
+    ):
         """See `EncodecModel.decode`."""
         ...
 

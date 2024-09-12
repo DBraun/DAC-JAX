@@ -491,17 +491,17 @@ class DAC(CompressionModel):
         self,
         dac_file_or_codes: Union[jnp.ndarray, DACFile],
         scale: Optional[jnp.ndarray] = None,
+        length: int = None,
     ) -> jnp.ndarray:
         assert scale is None
 
         if isinstance(dac_file_or_codes, DACFile):
             dac_file = dac_file_or_codes
-            original_length = dac_file.original_length
+            length = length or dac_file.original_length
             codes = dac_file.codes
             input_db = dac_file.input_db
             original_sr = dac_file.sample_rate
         else:
-            original_length = None
             codes = dac_file_or_codes
             input_db = None
             original_sr = None
@@ -518,8 +518,8 @@ class DAC(CompressionModel):
             out = resample(out, old_sr=self.sample_rate, new_sr=original_sr)
 
         # out contains extra padding added by the encoder and decoder
-        if original_length is not None:
-            out = out[..., :original_length]
+        if length is not None:
+            out = out[..., :length]
 
         return out
 

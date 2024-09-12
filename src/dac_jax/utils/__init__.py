@@ -74,7 +74,6 @@ def convert_torch_weights_to_numpy(
 
 @argbind.bind(group="download_encodec", positional=True, without_prefix=True)
 def download_encodec(
-    # name: str = "facebook/encodec_32khz",
     name: str = "facebook/musicgen-small",
 ):
     if (
@@ -213,7 +212,7 @@ def download_model(
 
 
 def load_encodec_model(
-    name: str,
+    name: str = "facebook/musicgen-small",
     load_path: str = None,
     metadata_path: str = None,
 ):
@@ -343,4 +342,4 @@ def load_model(
 
 
 if __name__ == "__main__":
-    load_encodec_model("facebook/musicgen-small")
+    load_encodec_model()

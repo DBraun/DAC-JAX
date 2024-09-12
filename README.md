@@ -1,11 +1,20 @@
-# DAC-JAX
+# DAC-JAX and EnCodec-JAX
 
-[Descript Audio Codec](https://github.com/descriptinc/descript-audio-codec) (.dac) is a high-fidelity general neural audio codec introduced in the paper  
-"[High-Fidelity Audio Compression with Improved RVQGAN](https://arxiv.org/abs/2306.06546)".
-
-This repository is an **unofficial** JAX implementation of the PyTorch-based DAC and has no affiliation with Descript.
+This repository holds **unofficial** JAX implementations of Descript's DAC and Meta's EnCodec.
+We are not affiliated with Descript or Meta.
 
 You can read the DAC-JAX paper [here](https://arxiv.org/abs/2405.11554).
+
+## Background
+
+In 2022, Meta published "[High Fidelity Neural Audio Compression](High Fidelity Neural Audio Compression)".
+They eventually open-sourced the code inside [AudioCraft](https://github.com/facebookresearch/audiocraft/blob/main/docs/ENCODEC.md).
+
+In 2023, Descript published a related work "[High-Fidelity Audio Compression with Improved RVQGAN](https://arxiv.org/abs/2306.06546)"
+and released their code under the name [DAC](https://github.com/descriptinc/descript-audio-codec/) (Descript Audio Codec).
+
+Both EnCodec and DAC are neural audio codecs which use residual vector quantization inside a fully convolutional
+encoder-decoder architecture.
 
 ## Usage
 
@@ -16,7 +25,9 @@ You can read the DAC-JAX paper [here](https://arxiv.org/abs/2405.11554).
     pip install --upgrade pip setuptools
     ```
 
-2. Install the **CPU** version of [PyTorch](https://pytorch.org/). We strongly suggest the CPU version because trying to install a GPU version can conflict with JAX's CUDA-related installation.
+2. Install the **CPU** version of [PyTorch](https://pytorch.org/).
+   We strongly suggest the CPU version because trying to install a GPU version can conflict with JAX's CUDA-related installation.
+   PyTorch is required because it's used to load pretrained model weights.
 
 3. Install [JAX](https://jax.readthedocs.io/en/latest/installation.html) (with GPU support).
 
@@ -53,7 +64,12 @@ python -m dac_jax download_model --model_type 24khz # downloads the 24kHz varian
 python -m dac_jax download_model --model_type 16khz # downloads the 16kHz variant
 ```
 
-The default download location is `~/.cache/dac_jax`. You can change the location by setting an **absolute path** value for an environment variable `DAC_JAX_CACHE`. For example, on macOS/Linux:
+EnCodec weights can be downloaded similarly. This will download the 32 kHz EnCodec used in [MusicGen](https://github.com/facebookresearch/audiocraft/blob/main/docs/MUSICGEN.md).
+```bash
+python -m dac_jax download_encodec
+```
+
+For both DAC and EnCodec, the default download location is `~/.cache/dac_jax`. You can change the location by setting an **absolute path** value for an environment variable `DAC_JAX_CACHE`. For example, on macOS/Linux:
 ```bash
 export DAC_JAX_CACHE=/Users/admin/my-project/dac_jax_models
 ```
@@ -135,6 +151,7 @@ signal, sample_rate = librosa.load('input.wav', sr=44100, mono=True, duration=.5
 
 signal = jnp.array(signal, dtype=jnp.float32)
 while signal.ndim < 3:
+    # signal will eventually be shaped [B, C, T]
     signal = jnp.expand_dims(signal, axis=0)
 
 # Jit-compile these functions because they're used inside a loop over chunks.
@@ -157,7 +174,7 @@ dac_file = dac_jax.DACFile.load("compressed.dac")
 y = model.decompress(decompress_chunk, dac_file)
 ```
 
-## Training
+## DAC Training
 The baseline model configuration can be trained using the following commands.
 
 ```bash
@@ -167,6 +184,54 @@ python scripts/train.py --args.load conf/final/44khz.yml --train.ckpt_dir="/tmp/
 In root directory, monitor with Tensorboard (`runs` will appear next to `scripts`):
 ```bash
 tensorboard --logdir="/tmp/dac_jax_runs"
+```
+
+## EnCodec Usage
+
+```python
+from functools import partial
+import jax
+from jax import numpy as jnp
+from jax import random
+import librosa
+
+from dac_jax import load_encodec_model
+
+encodec_model, variables = load_encodec_model()
+
+@jax.jit
+def encode_to_codes(x: jnp.ndarray):
+    codes, scale = encodec_model.apply(
+        variables, x, rngs={"rng_stream": random.key(0)}, method="encode",
+    )
+    return codes, scale
+
+@partial(jax.jit, static_argnums=(1, 2))
+def decode_from_codes(codes: jnp.ndarray, scale, length: int = None):
+    recons = encodec_model.apply(
+        variables, codes, scale, rngs={"rng_stream": random.key(0)}, method="decode",
+    )
+    if length is not None:
+        recons = recons[..., :length]
+
+    return recons
+
+# Load a mono audio file
+signal, sample_rate = librosa.load('input.wav', sr=44100, mono=True, duration=.5)
+
+signal = jnp.array(signal, dtype=jnp.float32)
+while signal.ndim < 3:
+    # signal will eventually be shaped [B, C, T]
+    signal = jnp.expand_dims(signal, axis=0)
+
+original_length = signal.shape[-1]
+
+codes, scale = encode_to_codes(signal)
+assert codes.shape[1] == encodec_model.num_codebooks
+
+recons = decode_from_codes(codes, scale, original_length)
+
+assert jnp.allclose(signal, recons, atol=1e-2)
 ```
 
 ## Testing
@@ -179,16 +244,14 @@ python -m pytest tests
 
 Pull requests—especially ones which address any of the limitations below—are welcome.
 
-* PyTorch is required as a dependency because it's used to load model weights before converting to JAX. As long as this is required, we recommend installing the CPU version of [PyTorch](https://pytorch.org/get-started/locally/).
 * We implement the "chunked" `compress`/`decompress` methods from the PyTorch repository, although this technique has some problems outlined [here](https://github.com/descriptinc/descript-audio-codec/issues/39).
-* We have not performed a full training run, although we have tested the train scripts, loss functions and eval metrics.
-* If you want to perform a training run—especially one which reproduces the original paper—you should examine any "todo" in `train.py` or in the config files.
 * We have not run all evaluation scripts in the `scripts` directory. For some of them, it makes sense to just keep using PyTorch instead of JAX.
 * The model architecture code (`model/dac.py`) has many static methods to help with finding DAC's `delay` and `output_length`. Please help us refactor this so that code is not so duplicated and at risk of typos.
-* In `audio_utils.py` we use [DM_AUX's](https://github.com/google-deepmind/dm_aux) STFT function instead of `jax.scipy.signal.stft`.
-* The source code of DAC-JAX has several `todo:` markings which indicate (mostly minor) improvements we'd like to have.
+* In `audio_utils.py` we use [DM_AUX's](https://github.com/google-deepmind/dm_aux) STFT function instead of `jax.scipy.signal.stft`. We believe this is faster but requires more memory.
+* The source code of DAC-JAX has some `todo:` markings which indicate (mostly minor) improvements we'd like to have.
 * We don't have a Docker image yet like the original [DAC repository](https://github.com/descriptinc/descript-audio-codec) does.
 * Please check the limitations of [argbind](https://github.com/pseeth/argbind?tab=readme-ov-file#limitations-and-known-issues).
+* We don't provide a training script for EnCodec.
 
 ## Citation
 

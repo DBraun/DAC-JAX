@@ -6,20 +6,21 @@ os.environ["XLA_FLAGS"] = (
 os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
+from functools import partial
 from pathlib import Path
 
 from audiocraft.models import MusicGen
+import jax
 from jax import numpy as jnp
 from jax import random
 import librosa
 import numpy as np
 import torch
 
-from dac_jax import load_encodec_model
-from dac_jax.nn.encodec_quantize import QuantizedResult
+from dac_jax import load_encodec_model, QuantizedResult
 
 
-def run_jax_model(np_data):
+def run_jax_model1(np_data):
 
     x = jnp.array(np_data)
 
@@ -30,6 +31,48 @@ def run_jax_model(np_data):
     )
     recons = result.recons
     codes = result.codes
+    assert codes.shape[1] == encodec_model.num_codebooks
+
+    return np.array(recons), np.array(codes)
+
+
+def run_jax_model2(np_data):
+    """jax.jit version of run_jax_model1"""
+
+    encodec_model, variables = load_encodec_model()
+
+    @jax.jit
+    def encode_to_codes(x: jnp.ndarray):
+        codes, scale = encodec_model.apply(
+            variables,
+            x,
+            rngs={"rng_stream": random.key(0)},
+            method="encode",
+        )
+        return codes, scale
+
+    @partial(jax.jit, static_argnums=(1, 2))
+    def decode_from_codes(codes: jnp.ndarray, scale, length: int = None):
+        recons = encodec_model.apply(
+            variables,
+            codes,
+            scale,
+            rngs={"rng_stream": random.key(0)},
+            method="decode",
+        )
+        if length is not None:
+            recons = recons[..., :length]
+
+        return recons
+
+    x = jnp.array(np_data)
+
+    original_length = x.shape[-1]
+
+    codes, scale = encode_to_codes(x)
+    assert codes.shape[1] == encodec_model.num_codebooks
+
+    recons = decode_from_codes(codes, scale, original_length)
 
     return np.array(recons), np.array(codes)
 
@@ -41,6 +84,7 @@ def run_torch_model(np_data):
 
     recons = result.x.detach().cpu().numpy()
     codes = result.codes.detach().cpu().numpy()
+    assert codes.shape[1] == model.compression_model.num_codebooks
 
     return recons, codes
 
@@ -56,7 +100,12 @@ def test_encoded_equivalence():
     np_data *= 0.5
 
     torch_recons, torch_codes = run_torch_model(np_data)
-    jax_recons, jax_codes = run_jax_model(np_data)
+    jax_recons, jax_codes = run_jax_model1(np_data)
+
+    assert np.allclose(torch_codes, jax_codes)
+    assert np.allclose(torch_recons, jax_recons, atol=1e-4)  # todo: reduce atol to 1e-5
+
+    jax_recons, jax_codes = run_jax_model2(np_data)
 
     assert np.allclose(torch_codes, jax_codes)
     assert np.allclose(torch_recons, jax_recons, atol=1e-4)  # todo: reduce atol to 1e-5
