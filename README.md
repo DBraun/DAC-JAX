@@ -7,7 +7,7 @@ You can read the DAC-JAX paper [here](https://arxiv.org/abs/2405.11554).
 
 ## Background
 
-In 2022, Meta published "[High Fidelity Neural Audio Compression](High Fidelity Neural Audio Compression)".
+In 2022, Meta published "[High Fidelity Neural Audio Compression](https://arxiv.org/abs/2210.13438)".
 They eventually open-sourced the code inside [AudioCraft](https://github.com/facebookresearch/audiocraft/blob/main/docs/ENCODEC.md).
 
 In 2023, Descript published a related work "[High-Fidelity Audio Compression with Improved RVQGAN](https://arxiv.org/abs/2306.06546)"
