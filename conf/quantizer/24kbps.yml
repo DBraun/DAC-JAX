@@ -2,4 +2,4 @@ $include:
   - conf/base.yml
   - conf/1gpu.yml
 
-DAC.n_codebooks: 28
+DAC.num_codebooks: 28

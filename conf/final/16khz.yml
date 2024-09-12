@@ -7,7 +7,7 @@ DAC.encoder_rates: [2, 4, 5, 8]
 
 DAC.decoder_rates: [8, 5, 4, 2]
 
-DAC.n_codebooks: 12
+DAC.num_codebooks: 12
 
 DAC.quantizer_dropout: 0.5
 

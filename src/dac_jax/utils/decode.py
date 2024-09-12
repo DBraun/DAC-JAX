@@ -10,7 +10,9 @@ from dac_jax import DACFile
 from dac_jax.utils import load_model
 
 
-warnings.filterwarnings("ignore", category=UserWarning)  # ignore librosa warnings related to mel bins
+warnings.filterwarnings(
+    "ignore", category=UserWarning
+)  # ignore librosa warnings related to mel bins
 
 
 @jax.jit
@@ -65,7 +67,7 @@ def decode(
 
     @jax.jit
     def decompress_chunk(c):
-        return model.apply(variables, c, method='decompress_chunk')
+        return model.apply(variables, c, method="decompress_chunk")
 
     for i in tqdm(range(len(input_files)), desc=f"Decoding files"):
         # Load file

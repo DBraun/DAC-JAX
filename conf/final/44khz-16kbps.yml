@@ -1,7 +1,7 @@
 $include:
   - conf/base.yml
 
-DAC.n_codebooks: 18 # Max bitrate of 16kbps
+DAC.num_codebooks: 18 # Max bitrate of 16kbps
 
 DAC.quantizer_dropout: 0.5
 

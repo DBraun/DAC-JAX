@@ -58,6 +58,7 @@ from dac_jax.nn.loss import (
     generator_loss,
     discriminator_loss,
 )
+from dac_jax.nn.quantize import QuantizedResult
 
 from input_pipeline import create_dataset as _create_dataset
 
@@ -295,14 +296,21 @@ def eval_step(
 
     audio_data = rearrange(audio_data, "b c t -> (b c) 1 t", c=1)
 
-    output = generator.apply_fn(
+    q_res: QuantizedResult = generator.apply_fn(
         {"params": generator.params},
         audio_data,
         sample_rate,
         train=False,
         rngs={"rng_stream": rng},
     )
-    recons = output["audio"]
+    recons = q_res.recons
+    output = {
+        "z": q_res.z,
+        "codes": q_res.codes,
+        "latents": q_res.latents,
+        "vq/commitment_loss": q_res.commitment_loss,
+        "vq/codebook_loss": q_res.codebook_loss,
+    }
 
     output["stft/loss"] = multiscale_stft_loss(audio_data, recons)
     output["mel/loss"] = mel_spectrogram_loss(
@@ -337,19 +345,19 @@ def train_step_discriminator(
     def loss_fn(params):
         # note: you could calculate with the ``generator`` again, since its weights were just updated,
         # but we prefer not to in order to run faster.
-        output = generator.apply_fn(
+        q_res: QuantizedResult = generator.apply_fn(
             {"params": generator.params},
             audio_data,
             sample_rate,
             rngs={"rng_stream": rng},
             train=True,  # todo: maybe pick Train=False even though DAC didn't
         )
-        recons = output["audio"]
+        recons = q_res.recons
 
         fake = discriminator.apply_fn({"params": params}, jax.lax.stop_gradient(recons))
         real = discriminator.apply_fn({"params": params}, audio_data)
 
-        loss = output["adv/disc_loss"] = discriminator_loss(fake, real)
+        loss = discriminator_loss(fake, real)
 
         return loss
 
@@ -375,10 +383,17 @@ def train_step_generator(
 
     def loss_fn(params):
 
-        output = generator.apply_fn(
+        q_res: QuantizedResult = generator.apply_fn(
             {"params": params}, audio_data, sample_rate, rngs={"rng_stream": rng}
         )
-        recons = output["audio"]
+        recons = q_res.recons
+        output = {
+            "z": q_res.z,
+            "codes": q_res.codes,
+            "latents": q_res.latents,
+            "vq/commitment_loss": q_res.commitment_loss,
+            "vq/codebook_loss": q_res.codebook_loss,
+        }
 
         fake = discriminator.apply_fn({"params": discriminator.params}, recons)
         real = discriminator.apply_fn({"params": discriminator.params}, audio_data)
@@ -461,14 +476,14 @@ def save_samples(
     batch_size = audio_data.shape[0]
     audio_data = rearrange(audio_data, "b c t -> (b c) 1 t", c=1)
 
-    output = generator.apply_fn(
+    q_res: QuantizedResult = generator.apply_fn(
         {"params": generator.params},
         audio_data,
         sample_rate,
         train=False,
         rngs={"rng_stream": rng},
     )
-    recons = output["audio"]
+    recons = q_res.recons
     recons = rearrange(recons, "(b c) 1 t -> b t c", b=batch_size, c=1)
     return recons
 

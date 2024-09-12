@@ -47,7 +47,9 @@ def find_audio(folder: Union[str, Path], ext: List[str] = None) -> List[Path]:
     return files
 
 
-def compute_stft_padding(length, window_length: int, hop_length: int, match_stride: bool):
+def compute_stft_padding(
+    length, window_length: int, hop_length: int, match_stride: bool
+):
     """Compute how the STFT should be padded, based on match_stride.
 
     Parameters
@@ -78,9 +80,14 @@ def compute_stft_padding(length, window_length: int, hop_length: int, match_stri
     return right_pad, pad
 
 
-def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', match_stride=False,
-         padding_type: str = 'reflect'):
-
+def stft(
+    x: jnp.ndarray,
+    frame_length=2048,
+    hop_factor=0.25,
+    window="hann",
+    match_stride=False,
+    padding_type: str = "reflect",
+):
     """Reference:
     https://github.com/descriptinc/audiotools/blob/7776c296c711db90176a63ff808c26e0ee087263/audiotools/core/audio_signal.py#L1123
     """
@@ -89,19 +96,30 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window='hann', matc
 
     frame_step = int(frame_length * hop_factor)
 
-    right_pad, pad = compute_stft_padding(audio_length, frame_length, frame_step, match_stride)
-    x = jnp.pad(x, pad_width=((0, 0), (0, 0), (pad, pad + right_pad)), mode=padding_type)
+    right_pad, pad = compute_stft_padding(
+        audio_length, frame_length, frame_step, match_stride
+    )
+    x = jnp.pad(
+        x, pad_width=((0, 0), (0, 0), (pad, pad + right_pad)), mode=padding_type
+    )
 
-    x = rearrange(x, 'b c t -> (b c) t')
+    x = rearrange(x, "b c t -> (b c) t")
 
-    if window == 'sqrt_hann':
+    if window == "sqrt_hann":
         from scipy import signal as scipy_signal
+
         window = jnp.sqrt(scipy_signal.get_window("hann", frame_length))
 
     # todo: https://github.com/google-deepmind/dm_aux/issues/2
-    stft_data = aux.spectral.stft(x, n_fft=frame_length, frame_step=frame_step, window_fn=window,
-                                  pad_mode=padding_type, pad=aux.spectral.Pad.BOTH)
-    stft_data = rearrange(stft_data, '(b c) nt nf -> b c nf nt', b=batch_size)
+    stft_data = aux.spectral.stft(
+        x,
+        n_fft=frame_length,
+        frame_step=frame_step,
+        window_fn=window,
+        pad_mode=padding_type,
+        pad=aux.spectral.Pad.BOTH,
+    )
+    stft_data = rearrange(stft_data, "(b c) nt nf -> b c nf nt", b=batch_size)
 
     if match_stride:
         # Drop first two and last two frames, which are added
@@ -123,7 +141,7 @@ def mel_spectrogram(
     num_features: int = 128,
     lower_edge_hertz: float = 0.0,
     upper_edge_hertz: Optional[float] = None,
-    ) -> chex.Array:
+) -> chex.Array:
     """Converts the spectrograms to Mel-scale.
 
     Adapted from dm_aux:
@@ -147,8 +165,12 @@ def mel_spectrogram(
     """
     # This setup mimics tf.signal.linear_to_mel_weight_matrix.
     linear_to_mel_weight_matrix = librosa.filters.mel(
-        sr=sample_rate, n_fft=frame_length, n_mels=num_features,
-        fmin=lower_edge_hertz, fmax=upper_edge_hertz).T
+        sr=sample_rate,
+        n_fft=frame_length,
+        n_mels=num_features,
+        fmin=lower_edge_hertz,
+        fmax=upper_edge_hertz,
+    ).T
     spectrograms = jnp.matmul(spectrograms, linear_to_mel_weight_matrix)
 
     if log_scale:
@@ -156,22 +178,22 @@ def mel_spectrogram(
     return spectrograms
 
 
-def decibel_loudness(stft_data: jnp.ndarray, clamp_eps=1e-5, pow=2.) -> jnp.ndarray:
+def decibel_loudness(stft_data: jnp.ndarray, clamp_eps=1e-5, pow=2.0) -> jnp.ndarray:
     return jnp.log10(jnp.power(jnp.maximum(jnp.abs(stft_data), clamp_eps), pow))
 
 
-def db2linear(decibels):
+def db2linear(decibels: jnp.ndarray):
     return jnp.pow(10.0, decibels / 20.0)
 
 
 def volume_norm(
-        audio_data: jnp.ndarray,
-        target_db: jnp.ndarray,
-        sample_rate: int,
-        filter_class: str = "K-weighting",
-        block_size: float = 0.400,
-        min_loudness: float = -70,
-        zeros: int = 2048,
+    audio_data: jnp.ndarray,
+    target_db: jnp.ndarray,
+    sample_rate: int,
+    filter_class: str = "K-weighting",
+    block_size: float = 0.400,
+    min_loudness: float = -70,
+    zeros: int = 2048,
 ):
     """Calculates loudness using an implementation of ITU-R BS.1770-4.
     Allows control over gating block size and frequency weighting filters for
@@ -221,17 +243,31 @@ def volume_norm(
     signal_duration = original_length / sample_rate
 
     if signal_duration < block_size:
-        padded_audio = jnp.pad(padded_audio,
-                               pad_width=((0, 0), (0, 0), (0, int(block_size*sample_rate)-original_length)))
+        padded_audio = jnp.pad(
+            padded_audio,
+            pad_width=(
+                (0, 0),
+                (0, 0),
+                (0, int(block_size * sample_rate) - original_length),
+            ),
+        )
 
     # create BS.1770 meter
-    meter = jln.Meter(sample_rate, filter_class=filter_class, block_size=block_size, use_fir=True, zeros=zeros)
+    meter = jln.Meter(
+        sample_rate,
+        filter_class=filter_class,
+        block_size=block_size,
+        use_fir=True,
+        zeros=zeros,
+    )
 
     # measure loudness
-    loudness = jax.vmap(meter.integrated_loudness)(rearrange(padded_audio, 'b c t -> b t c'))
+    loudness = jax.vmap(meter.integrated_loudness)(
+        rearrange(padded_audio, "b c t -> b t c")
+    )
 
     loudness = jnp.maximum(loudness, jnp.full_like(loudness, min_loudness))
 
-    audio_data = audio_data * db2linear(target_db-loudness)[:, None, None]
+    audio_data = audio_data * db2linear(target_db - loudness)[:, None, None]
 
     return audio_data, loudness

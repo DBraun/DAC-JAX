@@ -1,6 +1,7 @@
 """
 Tests for CLI.
 """
+
 import subprocess
 from pathlib import Path
 
@@ -21,7 +22,7 @@ def setup_module(module):
     for i in range(5):
         sample_rate = 44_100
         signal = np.random.randn(1000, sample_rate)
-        soundfile.write(input_dir / f'sample_{i}.wav', signal, samplerate=sample_rate)
+        soundfile.write(input_dir / f"sample_{i}.wav", signal, samplerate=sample_rate)
     return input_dir
 
 

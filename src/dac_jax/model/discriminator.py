@@ -12,7 +12,7 @@ from dac_jax.nn.layers import make_initializer
 
 class LeakyReLU(nn.Module):
 
-    negative_slope: float = .01
+    negative_slope: float = 0.01
 
     @nn.compact
     def __call__(self, x):
@@ -27,13 +27,21 @@ class WNConv(nn.Conv):
     def __call__(self, x):
 
         kernel_init = make_initializer(
-            x.shape[-1], self.features, self.kernel_size, self.feature_group_count, mode="fan_in",
+            x.shape[-1],
+            self.features,
+            self.kernel_size,
+            self.feature_group_count,
+            mode="fan_in",
         )
 
         if self.use_bias:
             # note: we just ignore whatever self.bias_init is
             bias_init = make_initializer(
-                x.shape[-1], self.features, self.kernel_size, self.feature_group_count, mode="fan_in",
+                x.shape[-1],
+                self.features,
+                self.kernel_size,
+                self.feature_group_count,
+                mode="fan_in",
             )
         else:
             bias_init = None
@@ -52,14 +60,14 @@ class WNConv(nn.Conv):
             param_dtype=self.param_dtype,
             precision=self.precision,
             kernel_init=kernel_init,
-            bias_init=bias_init
+            bias_init=bias_init,
         )
         scale_init = nn.initializers.constant(1 / jnp.sqrt(3))
         block = nn.WeightNorm(conv, scale_init=scale_init)
         x = block(x)
 
         if self.act:
-            x = LeakyReLU(.1)(x)
+            x = LeakyReLU(0.1)(x)
 
         return x
 
@@ -70,18 +78,47 @@ class MPD(nn.Module):
 
     def pad_to_period(self, x):
         t = x.shape[-1]
-        x = jnp.pad(x, pad_width=((0, 0), (0, 0), (0, self.period - t % self.period)), mode='reflect')
+        x = jnp.pad(
+            x,
+            pad_width=((0, 0), (0, 0), (0, self.period - t % self.period)),
+            mode="reflect",
+        )
         return x
 
     @nn.compact
     def __call__(self, x):
         convs = [
-            WNConv(features=32, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
-            WNConv(features=128, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
-            WNConv(features=512, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
-            WNConv(features=1024, kernel_size=(5, 1), strides=(3, 1), padding=((2, 2), (0, 0))),
-            WNConv(features=1024, kernel_size=(5, 1), strides=(1, 1), padding=((2, 2), (0, 0))),
-            WNConv(features=1, kernel_size=(3, 1), padding=((1, 1), (0, 0)), act=False)
+            WNConv(
+                features=32,
+                kernel_size=(5, 1),
+                strides=(3, 1),
+                padding=((2, 2), (0, 0)),
+            ),
+            WNConv(
+                features=128,
+                kernel_size=(5, 1),
+                strides=(3, 1),
+                padding=((2, 2), (0, 0)),
+            ),
+            WNConv(
+                features=512,
+                kernel_size=(5, 1),
+                strides=(3, 1),
+                padding=((2, 2), (0, 0)),
+            ),
+            WNConv(
+                features=1024,
+                kernel_size=(5, 1),
+                strides=(3, 1),
+                padding=((2, 2), (0, 0)),
+            ),
+            WNConv(
+                features=1024,
+                kernel_size=(5, 1),
+                strides=(1, 1),
+                padding=((2, 2), (0, 0)),
+            ),
+            WNConv(features=1, kernel_size=(3, 1), padding=((1, 1), (0, 0)), act=False),
         ]
 
         fmap = []
@@ -105,15 +142,39 @@ class MSD(nn.Module):
     def __call__(self, x):
         convs = [
             WNConv(features=16, kernel_size=15, strides=1, padding=7),
-            WNConv(features=64, kernel_size=41, strides=4, feature_group_count=4, padding=20),
-            WNConv(features=256, kernel_size=41, strides=4, feature_group_count=16, padding=20),
-            WNConv(features=1024, kernel_size=41, strides=4, feature_group_count=64, padding=20),
-            WNConv(features=1024, kernel_size=41, strides=4, feature_group_count=256, padding=20),
+            WNConv(
+                features=64,
+                kernel_size=41,
+                strides=4,
+                feature_group_count=4,
+                padding=20,
+            ),
+            WNConv(
+                features=256,
+                kernel_size=41,
+                strides=4,
+                feature_group_count=16,
+                padding=20,
+            ),
+            WNConv(
+                features=1024,
+                kernel_size=41,
+                strides=4,
+                feature_group_count=64,
+                padding=20,
+            ),
+            WNConv(
+                features=1024,
+                kernel_size=41,
+                strides=4,
+                feature_group_count=256,
+                padding=20,
+            ),
             WNConv(features=1024, kernel_size=5, strides=1, padding=2),
-            WNConv(features=1, kernel_size=3, strides=1, padding=1, act=False)
+            WNConv(features=1, kernel_size=3, strides=1, padding=1, act=False),
         ]
 
-        x = resample(x, old_sr=self.sample_rate, new_sr=self.sample_rate//self.rate)
+        x = resample(x, old_sr=self.sample_rate, new_sr=self.sample_rate // self.rate)
 
         x = rearrange(x, "b c l -> b l c")
 
@@ -143,7 +204,6 @@ class MRD(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-
         """Complex multi-band spectrogram discriminator.
         Parameters
         ----------
@@ -159,14 +219,45 @@ class MRD(nn.Module):
 
         ch = 32
         convs = lambda: [
-            WNConv(features=ch, kernel_size=(3, 9), strides=(1, 1), padding=((1, 1), (4, 4))),
-            WNConv(features=ch, kernel_size=(3, 9),  strides=(1, 2), padding=((1, 1), (4, 4))),
-            WNConv(features=ch, kernel_size=(3, 9),  strides=(1, 2), padding=((1, 1), (4, 4))),
-            WNConv(features=ch, kernel_size=(3, 9),  strides=(1, 2), padding=((1, 1), (4, 4))),
-            WNConv(features=ch, kernel_size=(3, 3),  strides=(1, 1), padding=((1, 1), (1, 1))),
+            WNConv(
+                features=ch,
+                kernel_size=(3, 9),
+                strides=(1, 1),
+                padding=((1, 1), (4, 4)),
+            ),
+            WNConv(
+                features=ch,
+                kernel_size=(3, 9),
+                strides=(1, 2),
+                padding=((1, 1), (4, 4)),
+            ),
+            WNConv(
+                features=ch,
+                kernel_size=(3, 9),
+                strides=(1, 2),
+                padding=((1, 1), (4, 4)),
+            ),
+            WNConv(
+                features=ch,
+                kernel_size=(3, 9),
+                strides=(1, 2),
+                padding=((1, 1), (4, 4)),
+            ),
+            WNConv(
+                features=ch,
+                kernel_size=(3, 3),
+                strides=(1, 1),
+                padding=((1, 1), (1, 1)),
+            ),
         ]
         band_convs = [convs() for _ in range(len(self.bands))]
-        conv_post = WNConv(features=1, kernel_size=(3, 3), strides=(1, 1), padding=((1, 1), (1, 1)), act=False)
+        conv_post = WNConv(
+            features=1,
+            kernel_size=(3, 3),
+            strides=(1, 1),
+            padding=((1, 1), (1, 1)),
+            act=False,
+        )
 
         x_bands = self.get_bands(x)
         fmap = []
@@ -186,9 +277,16 @@ class MRD(nn.Module):
         return fmap
 
     def get_bands(self, x):
-        stft_data = stft(x, frame_length=self.window_length, hop_factor=self.hop_factor, match_stride=True)
+        stft_data = stft(
+            x,
+            frame_length=self.window_length,
+            hop_factor=self.hop_factor,
+            match_stride=True,
+        )
         x = self.as_real(stft_data)
-        x = rearrange(x, "b c f t ri -> (b c) ri t f", c=1, ri=2)  # ri is 2 for real and imaginary
+        x = rearrange(
+            x, "b c f t ri -> (b c) ri t f", c=1, ri=2
+        )  # ri is 2 for real and imaginary
         # Split into bands
         x_bands = [x[..., low:high] for low, high in self.bands]
         return x_bands
@@ -239,7 +337,10 @@ class Discriminator(nn.Module):
         discriminators = []
         discriminators += [MPD(p) for p in self.periods]
         discriminators += [MSD(r, sample_rate=self.sample_rate) for r in self.rates]
-        discriminators += [MRD(f, sample_rate=self.sample_rate, bands=self.bands) for f in self.fft_sizes]
+        discriminators += [
+            MRD(f, sample_rate=self.sample_rate, bands=self.bands)
+            for f in self.fft_sizes
+        ]
         x = self.preprocess(x)
         fmaps = [d(x) for d in discriminators]
         return fmaps
@@ -251,13 +352,17 @@ if __name__ == "__main__":
     disc = Discriminator()
     x = jnp.zeros(shape=(1, 1, 44100))
 
-    print(disc.tabulate(jax.random.key(1), x,
-                        # compute_flops=True,
-                        # compute_vjp_flops=True,
-                        depth=3,
-                        # column_kwargs={"width": 400},
-                        console_kwargs={"width": 400},
-                        ))
+    print(
+        disc.tabulate(
+            jax.random.key(1),
+            x,
+            # compute_flops=True,
+            # compute_vjp_flops=True,
+            depth=3,
+            # column_kwargs={"width": 400},
+            console_kwargs={"width": 400},
+        )
+    )
 
     results, variables = disc.init_with_output(jax.random.key(3), x)
 
@@ -265,5 +370,8 @@ if __name__ == "__main__":
         print(f"disc{i}")
         for i, _r in enumerate(result):
             r = np.array(_r)
-            print(r.shape, f"{r.mean().item():,.5f}, {r.min().item():,.5f} {r.max().item():,.5f}")
-    print('All Done!')
+            print(
+                r.shape,
+                f"{r.mean().item():,.5f}, {r.min().item():,.5f} {r.max().item():,.5f}",
+            )
+    print("All Done!")
