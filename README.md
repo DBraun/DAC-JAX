@@ -96,7 +96,62 @@ It will also preserve the directory structure relative to input root and
 re-create it in the output directory. Please use `python -m dac_jax decode --help`
 for more options.
 
-### Programmatic usage
+### Programmatic usage (DAC and EnCodec)
+
+Here we use `jax.jit` for optimized encoding and decoding.
+This does not do sample-rate conversion or volume normalization in the encoder or decoder.
+
+```python
+from functools import partial
+
+import jax
+from jax import numpy as jnp
+import librosa
+
+import dac_jax
+
+model, variables = dac_jax.load_model(model_type="44khz")
+
+# if you want to use pretrained 32 kHz EnCodec
+# model, variables = dac_jax.load_encodec_model()
+
+
+@jax.jit
+def encode_to_codes(x: jnp.ndarray):
+    codes, scale = model.apply(
+        variables,
+        x,
+        method="encode",
+    )
+    return codes, scale
+
+@partial(jax.jit, static_argnums=(1, 2))
+def decode_from_codes(codes: jnp.ndarray, scale, length: int = None):
+    recons = model.apply(
+        variables,
+        codes,
+        scale,
+        length,
+        method="decode",
+    )
+    return recons
+
+# Load a mono audio file
+signal, sample_rate = librosa.load('input.wav', sr=44100, mono=True, duration=.5)
+
+signal = jnp.array(signal, dtype=jnp.float32)
+while signal.ndim < 3:
+    signal = jnp.expand_dims(signal, axis=0)
+
+original_length = signal.shape[-1]
+
+codes, scale = encode_to_codes(signal)
+assert codes.shape[1] == model.num_codebooks
+
+recons = decode_from_codes(codes, scale, original_length)
+```
+
+### DAC with Binding
 
 Here we use DAC-JAX as a "[bound](https://flax.readthedocs.io/en/latest/developer_notes/module_lifecycle.html#bind)" module, freeing us from repeatedly passing variables as an argument and using `.apply`. Note that bound modules are not meant to be used in fine-tuning.
 
@@ -104,7 +159,7 @@ Here we use DAC-JAX as a "[bound](https://flax.readthedocs.io/en/latest/develope
 import dac_jax
 from dac_jax import DACFile
 
-import jax.numpy as jnp
+from jax import numpy as jnp
 import librosa
 
 # Download a model and bind variables to it.
@@ -118,7 +173,8 @@ signal = jnp.array(signal, dtype=jnp.float32)
 while signal.ndim < 3:
     signal = jnp.expand_dims(signal, axis=0)
 
-# Encode audio signal as one long file (may run out of GPU memory on long files)
+# Encode audio signal as one long file (may run out of GPU memory on long files).
+# This performs resampling to the codec's sample rate and volume normalization.
 dac_file = model.encode_to_dac(signal, sample_rate)
 
 # Save to a file
@@ -127,14 +183,15 @@ dac_file.save("dac_file_001.dac")
 # Load a file
 dac_file = DACFile.load("dac_file_001.dac")
 
-# Decode audio signal
+# Decode audio signal. Since we're passing a dac_file, this undoes the 
+# previous sample rate conversion and volume normalization.
 y = model.decode(dac_file)
 
 # Calculate mean-square error of reconstruction in time-domain
 mse = jnp.square(y-signal).mean()
 ```
 
-### Compression with constant GPU memory regardless of input length:
+### DAC compression with constant GPU memory regardless of input length:
 
 ```python
 import dac_jax
@@ -186,54 +243,6 @@ In root directory, monitor with Tensorboard (`runs` will appear next to `scripts
 tensorboard --logdir="/tmp/dac_jax_runs"
 ```
 
-## EnCodec Usage
-
-```python
-from functools import partial
-import jax
-from jax import numpy as jnp
-from jax import random
-import librosa
-
-from dac_jax import load_encodec_model
-
-encodec_model, variables = load_encodec_model()
-
-@jax.jit
-def encode_to_codes(x: jnp.ndarray):
-    codes, scale = encodec_model.apply(
-        variables, x, rngs={"rng_stream": random.key(0)}, method="encode",
-    )
-    return codes, scale
-
-@partial(jax.jit, static_argnums=(1, 2))
-def decode_from_codes(codes: jnp.ndarray, scale, length: int = None):
-    recons = encodec_model.apply(
-        variables, codes, scale, rngs={"rng_stream": random.key(0)}, method="decode",
-    )
-    if length is not None:
-        recons = recons[..., :length]
-
-    return recons
-
-# Load a mono audio file
-signal, sample_rate = librosa.load('input.wav', sr=44100, mono=True, duration=.5)
-
-signal = jnp.array(signal, dtype=jnp.float32)
-while signal.ndim < 3:
-    # signal will eventually be shaped [B, C, T]
-    signal = jnp.expand_dims(signal, axis=0)
-
-original_length = signal.shape[-1]
-
-codes, scale = encode_to_codes(signal)
-assert codes.shape[1] == encodec_model.num_codebooks
-
-recons = decode_from_codes(codes, scale, original_length)
-
-assert jnp.allclose(signal, recons, atol=1e-2)
-```
-
 ## Testing
 
 ```
@@ -255,7 +264,17 @@ Pull requests—especially ones which address any of the limitations below—are
 
 ## Citation
 
-If you use DAC-JAX in your work, please cite the original DAC:
+If you use this repository in your work, please cite  EnCodec:
+```
+@article{defossez2022high,
+  title={High fidelity neural audio compression},
+  author={D{\'e}fossez, Alexandre and Copet, Jade and Synnaeve, Gabriel and Adi, Yossi},
+  journal={arXiv preprint arXiv:2210.13438},
+  year={2022}
+}
+```
+
+DAC:
 
 ```
 @article{kumar2024high,
@@ -266,6 +285,8 @@ If you use DAC-JAX in your work, please cite the original DAC:
   year={2024}
 }
 ```
+
+
 
 and DAC-JAX:
 

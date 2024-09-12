@@ -13,6 +13,7 @@ from jax import numpy as jnp
 import numpy as np
 
 from dac_jax.model.core import CompressionModel
+from dac_jax.nn.quantize import QuantizedResult
 
 from dac_jax.nn.encodec_layers import (
     StreamableConv1d,
@@ -459,13 +460,13 @@ class EncodecModel(CompressionModel):
             x = x * scale.reshape(-1, 1, 1)
         return x
 
-    def __call__(self, x: jnp.ndarray, train=False):  # todo: -> qt.QuantizedResult:
+    def __call__(self, x: jnp.ndarray, train=False) -> QuantizedResult:
         assert x.ndim == 3
         length = x.shape[-1]
         x, scale = self.preprocess(x)
 
         emb = self.encoder(x)
-        q_res = self.quantizer(emb, self.frame_rate, train=train)
+        q_res: QuantizedResult = self.quantizer(emb, self.frame_rate, train=train)
         out = self.decoder(q_res.z)
 
         # remove extra padding added by the encoder and decoder

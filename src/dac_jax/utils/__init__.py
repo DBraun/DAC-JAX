@@ -324,6 +324,7 @@ def load_model(
         kwargs = json.loads(f.read())
 
     kwargs["padding"] = padding  # todo: seems like bad design
+    kwargs["num_codebooks"] = kwargs.pop("n_codebooks")
 
     model = DAC(**kwargs)
 

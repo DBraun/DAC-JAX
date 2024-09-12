@@ -434,10 +434,9 @@ class DAC(CompressionModel):
         self,
         audio_data: jnp.ndarray,
         n_quantizers: int = None,
-        train=True,
     ) -> Tuple[jnp.ndarray, Optional[jnp.ndarray]]:
         emb = self.encoder(audio_data)
-        q_res = self.quantizer(emb, n_quantizers=n_quantizers, train=train)
+        q_res = self.quantizer(emb, n_quantizers=n_quantizers, train=False)
         codes = q_res.codes
         return codes, None
 

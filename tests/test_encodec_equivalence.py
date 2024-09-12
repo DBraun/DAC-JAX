@@ -27,7 +27,7 @@ def run_jax_model1(np_data):
     encodec_model, variables = load_encodec_model("facebook/musicgen-small")
 
     result: QuantizedResult = encodec_model.apply(
-        variables, x, rngs={"rng_stream": random.key(0)}
+        variables, x, train=False, rngs={"rng_stream": random.key(0)}
     )
     recons = result.recons
     codes = result.codes
@@ -39,29 +39,26 @@ def run_jax_model1(np_data):
 def run_jax_model2(np_data):
     """jax.jit version of run_jax_model1"""
 
-    encodec_model, variables = load_encodec_model()
+    model, variables = load_encodec_model()
 
     @jax.jit
     def encode_to_codes(x: jnp.ndarray):
-        codes, scale = encodec_model.apply(
+        codes, scale = model.apply(
             variables,
             x,
-            rngs={"rng_stream": random.key(0)},
             method="encode",
         )
         return codes, scale
 
     @partial(jax.jit, static_argnums=(1, 2))
     def decode_from_codes(codes: jnp.ndarray, scale, length: int = None):
-        recons = encodec_model.apply(
+        recons = model.apply(
             variables,
             codes,
             scale,
-            rngs={"rng_stream": random.key(0)},
+            length,
             method="decode",
         )
-        if length is not None:
-            recons = recons[..., :length]
 
         return recons
 
@@ -70,7 +67,7 @@ def run_jax_model2(np_data):
     original_length = x.shape[-1]
 
     codes, scale = encode_to_codes(x)
-    assert codes.shape[1] == encodec_model.num_codebooks
+    assert codes.shape[1] == model.num_codebooks
 
     recons = decode_from_codes(codes, scale, original_length)
 

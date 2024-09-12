@@ -6,6 +6,7 @@ os.environ["XLA_FLAGS"] = (
 os.environ["TF_CUDNN_DETERMINISTIC"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
+from functools import partial
 from pathlib import Path
 
 import torch
@@ -13,7 +14,8 @@ import torch
 torch.use_deterministic_algorithms(True)
 
 import jax
-import jax.numpy as jnp
+from jax import numpy as jnp
+from jax import random
 
 import dac as dac_torch
 from audiotools import AudioSignal
@@ -96,6 +98,43 @@ def _jax_padding(np_data) -> dict[np.array]:
     return y
 
 
+def _jax_padding_jit(np_data):
+
+    model, variables = dac_jax.load_model(model_type="44khz")
+
+    @jax.jit
+    def encode_to_codes(x: jnp.ndarray):
+        codes, scale = model.apply(
+            variables,
+            x,
+            method="encode",
+        )
+        return codes, scale
+
+    @partial(jax.jit, static_argnums=(1, 2))
+    def decode_from_codes(codes: jnp.ndarray, scale, length: int = None):
+        recons = model.apply(
+            variables,
+            codes,
+            scale,
+            length,
+            method="decode",
+        )
+
+        return recons
+
+    x = jnp.array(np_data)
+
+    original_length = x.shape[-1]
+
+    codes, scale = encode_to_codes(x)
+    assert codes.shape[1] == model.num_codebooks
+
+    recons = decode_from_codes(codes, scale, original_length)
+
+    return np.array(recons), np.array(codes)
+
+
 def _jax_compress(np_data, win_duration: float):
 
     # set padding to False since we're using the chunk functions
@@ -165,6 +204,13 @@ def test_equivalence_padding():
         assert np.allclose(
             jax_result[key], torch_result[key], atol=atol
         ), f"Failed to match outputs for key: {key} and atol: {atol}"
+
+    jax_recons, jax_codes = _jax_padding_jit(np_data)
+
+    assert np.allclose(torch_result["codes"], jax_codes)
+    assert np.allclose(
+        torch_result["audio"], jax_recons, atol=1e-4
+    )  # todo: reduce atol to 1e-5
 
 
 def test_equivalence_compress(verbose=False):
