@@ -112,9 +112,8 @@ import dac_jax
 
 model, variables = dac_jax.load_model(model_type="44khz")
 
-# if you want to use pretrained 32 kHz EnCodec
+# If you want to use pretrained 32 kHz EnCodec from Meta's MusicGen, use this:
 # model, variables = dac_jax.load_encodec_model()
-
 
 @jax.jit
 def encode_to_codes(x: jnp.ndarray):
@@ -136,8 +135,8 @@ def decode_from_codes(codes: jnp.ndarray, scale, length: int = None):
     )
     return recons
 
-# Load a mono audio file
-signal, sample_rate = librosa.load('input.wav', sr=44100, mono=True, duration=.5)
+# Load a mono audio file with the correct sample rate
+signal, sample_rate = librosa.load('input.wav', sr=model.sample_rate, mono=True, duration=.5)
 
 signal = jnp.array(signal, dtype=jnp.float32)
 while signal.ndim < 3:
@@ -203,8 +202,8 @@ import librosa
 # Download a model and set padding to False because we will use the chunk functions.
 model, variables = dac_jax.load_model(model_type="44khz", padding=False)
 
-# Load a mono audio file
-signal, sample_rate = librosa.load('input.wav', sr=44100, mono=True, duration=.5)
+# Load a mono audio file at any sample rate
+signal, sample_rate = librosa.load('input.wav', sr=None, mono=True)
 
 signal = jnp.array(signal, dtype=jnp.float32)
 while signal.ndim < 3:
