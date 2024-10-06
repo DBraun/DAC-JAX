@@ -60,7 +60,6 @@ def make_iterator(
     dataloader: grain.DataLoader,
     operations: List[grain.Transformation],
     seed: int,
-    sample_rate: int,
 ):
     n_gpus = jax.device_count()
     devices = mesh_utils.create_device_mesh((n_gpus,))
@@ -76,10 +75,10 @@ def make_iterator(
         in_specs=(P(None), P("ensemble")),
         out_specs=P("ensemble"),
     )
-    @partial(
-        jax.vmap, in_axes=(0, None), out_axes=0
-    )  # vmap over just `key`.  # todo: set `out_axes=None`
     def main_transform(key: jax.Array, batch):
+
+        key = jax.random.fold_in(key, jax.lax.axis_index("ensemble"))
+
         for transform in operations:
             if isinstance(transform, grain.RandomMapTransform):
                 key, subkey = random.split(key)
@@ -101,12 +100,8 @@ def make_iterator(
         batch_out = jax.device_put(batch, named_sharding)
 
         key, subkey = random.split(key)
-        tmp_keys = random.split(subkey, jax.device_count())
 
-        batch_out = main_transform(tmp_keys, batch_out)
-
-        # todo: don't use this ReduceBatchTransform since we should be able to use `out_axes=None` above in the vmap.
-        batch_out = ReduceBatchTransform(sample_rate=sample_rate).map(batch_out)
+        batch_out = main_transform(subkey, batch_out)
 
         yield batch_out
 
@@ -236,7 +231,7 @@ def create_dataset(
         operations += post_transforms
 
     batched_dataloader = make_iterator(
-        tmp_dataloader, operations, seed=seed + 1, sample_rate=sample_rate
+        tmp_dataloader, operations, seed=seed + 1
     )
 
     if prefetch_size is not None and prefetch_size > 1:
