@@ -341,7 +341,7 @@ class VectorQuantization(nn.Module):
     kmeans_init: int = 0  # bool
     kmeans_iters: int = 10
     threshold_ema_dead_code: int = 2
-    channels_last: int = 0  # bool
+    channels_last: int = 1  # bool
     commitment_weight: float = 1.0
     orthogonal_reg_weight: float = 0.0
     orthogonal_reg_active_codes_only: int = 0  # bool
@@ -375,12 +375,12 @@ class VectorQuantization(nn.Module):
         return self._codebook.inited
 
     def _preprocess(self, x):
-        if not self.channels_last:
+        if self.channels_last:
             x = rearrange(x, "b d n -> b n d")
         return x
 
     def _postprocess(self, quantize):
-        if not self.channels_last:
+        if self.channels_last:
             quantize = rearrange(quantize, "b n d -> b d n")
         return quantize
 
@@ -545,7 +545,7 @@ class ResidualVectorQuantizer(BaseQuantizer):
             orthogonal_reg_weight=self.orthogonal_reg_weight,
             orthogonal_reg_active_codes_only=self.orthogonal_reg_active_codes_only,
             orthogonal_reg_max_codes=self.orthogonal_reg_max_codes,
-            channels_last=False,
+            channels_last=True,
         )
         self.vq = ResidualVectorQuantization(
             num_quantizers=self.n_q, vector_quantization=vector_quantization
