@@ -93,16 +93,16 @@ VolumeNorm.config:
   min_db: -16
   max_db: -16
 
-train/build_transforms.augment:
+train/augment_batch.transforms:
   - VolumeNorm
   - RescaleAudio
   - ShiftPhase
 
-val/build_transforms.augment:
+val/augment_batch.transforms:
   - VolumeNorm
   - RescaleAudio
 
-sample/build_transforms.augment:
+sample/augment_batch.transforms:
   - VolumeNorm
   - RescaleAudio
 

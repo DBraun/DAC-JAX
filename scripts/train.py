@@ -33,18 +33,22 @@ assert jax.config.jax_default_prng_impl == "threefry2x32"
 from jax import numpy as jnp
 from jax import random
 from jax.experimental import mesh_utils
+from jax.experimental.shard_map import shard_map
 from jax.sharding import NamedSharding, Mesh, PartitionSpec as P
 
 from absl import logging
 import argbind
 from audiotree import AudioTree
+from audiotree import transforms as transforms_lib
 from clu import metric_writers, periodic_actions
 from clu.metrics import Average, Collection
 from einops import rearrange
+from flax import linen as nn
 from flax import struct
 from flax.training import common_utils
 from flax.training.early_stopping import EarlyStopping
 from flax.training.train_state import TrainState
+from grain import python as grain
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
@@ -82,6 +86,41 @@ devices = mesh_utils.create_device_mesh((n_gpus,))
 mesh = Mesh(devices, ("ensemble",))
 data_sharding = NamedSharding(mesh, P("ensemble"))
 replicated_sharding = NamedSharding(mesh, P())
+
+
+def shard_ensemble(x):
+    return jax.device_put(x, data_sharding)
+
+
+@argbind.bind("train", "val", "test", "sample")
+def augment_batch(
+    rng: jax.Array,
+    batch: AudioTree,
+    transforms: list[str] = None,
+) -> AudioTree:
+    """
+    :param transforms: A list of str names of Transforms (from ``audiotree.transforms``) such as VolumeNorm
+    :return: audio latents
+    """
+
+    transforms = transforms or []
+
+    key = rng
+
+    for TransformClass in transforms:
+        transform = getattr(transforms_lib, TransformClass)()
+        if isinstance(transform, grain.RandomMapTransform):
+            key, subkey = random.split(key)
+            batch = transform.random_map(batch, subkey)
+        elif isinstance(transform, grain.MapTransform):
+            batch = transform.map(batch)
+        elif hasattr(transform, "np_random_map"):  # TfRandomMapTransform
+            key, subkey = random.split(key)
+            batch = transform.np_random_map(batch, subkey)
+        else:
+            raise ValueError(f"Unknown operation type: {type(transform)}")
+
+    return batch
 
 
 @argbind.bind()
@@ -276,10 +315,6 @@ def create_discriminator(
     return state
 
 
-@partial(
-    jax.jit,
-    static_argnums=4,
-)
 @argbind.bind(without_prefix=True)  # use argbind for lambdas
 def eval_step(
     rng: jax.Array,
@@ -289,6 +324,12 @@ def eval_step(
     sample_rate: int,
     lambdas: Mapping[str, float] = None,
 ) -> EvalMetrics:
+
+    rng = jax.random.fold_in(rng, jax.lax.axis_index("ensemble"))
+
+    rng1, rng2 = random.split(rng)
+
+    audio_tree = augment_batch(rng1, audio_tree)
 
     assert lambdas is not None
 
@@ -301,7 +342,7 @@ def eval_step(
         audio_data,
         sample_rate,
         train=False,
-        rngs={"rng_stream": rng},
+        rngs={"rng_stream": rng2},
     )
     recons = q_res.recons
     output = {
@@ -417,7 +458,6 @@ def train_step_generator(
     return generator, output
 
 
-@partial(jax.jit, donate_argnums=(1, 2), static_argnums=5)
 def train_step(
     key: jax.Array,
     generator: TrainState,
@@ -427,6 +467,11 @@ def train_step(
     sample_rate: int,
 ) -> Tuple[TrainState, TrainState, TrainMetrics]:
     """Train for a single step."""
+
+    key = jax.random.fold_in(key, jax.lax.axis_index("ensemble"))
+    key, subkey = random.split(key)
+
+    audio_tree = augment_batch(subkey, audio_tree)
 
     audio_data = audio_tree.audio_data
     audio_data = rearrange(audio_data, "b c t -> (b c) 1 t", c=1)
@@ -467,7 +512,6 @@ def save_checkpoint(
         checkpoint_manager.wait_until_finished()
 
 
-@partial(jax.jit, static_argnums=3)
 def save_samples(
     rng: jax.Array, generator: TrainState, audio_tree: AudioTree, sample_rate: int
 ):
@@ -581,15 +625,15 @@ def train(
     create_dataset = partial(_create_dataset, sample_rate=SAMPLE_RATE)
 
     with argbind.scope(args, "train"):
-        train_iter = create_dataset(
+        train_iter = iter(create_dataset(
             batch_size=batch_size, train=True, num_steps=num_iterations
-        )
+        ))
 
     with argbind.scope(args, "sample"):
         num_epochs = None  # so that it can iterate forever.
-        sample_iter = create_dataset(
+        sample_iter = iter(create_dataset(
             batch_size=sample_batch_size, num_epochs=num_epochs
-        )
+        ))
 
     def best_fn(eval_metrics_summary) -> float:
         return eval_metrics_summary[best_key]
@@ -673,6 +717,47 @@ def train(
     early_stop = EarlyStopping()
 
     train_metrics_all = []
+    eval_dataset = None
+
+    gen_state_fsdp_specs = nn.get_partition_spec(jax.eval_shape(lambda: generator_state))
+    disc_state_fsdp_specs = nn.get_partition_spec(jax.eval_shape(lambda: discriminator_state))
+
+    def bound_train_step(*args, **kwargs):
+        with argbind.scope(args, "train"):
+            return train_step(*args, **kwargs)
+
+    def bound_eval_step(*args, **kwargs):
+        with argbind.scope(args, "val"):
+            return eval_step(*args, **kwargs)
+
+    jit_train_step = jax.jit(
+        shard_map(bound_train_step,
+                  mesh,
+                  in_specs=(P(), P(), P(), P("ensemble"), None, None),
+                  out_specs=(gen_state_fsdp_specs, disc_state_fsdp_specs, P()),
+                  check_rep=False,  # todo:
+                  ),
+        donate_argnums=(1, 2),
+        static_argnums=5,
+    )
+    jit_eval_step = jax.jit(
+        shard_map(bound_eval_step,
+                  mesh,
+                  in_specs=(P(), P(), P(), P("ensemble"), None),
+                  out_specs=P(),
+                  check_rep=False,  # todo:
+                  ),
+        static_argnums=4,
+    )
+    jit_generate_step = jax.jit(
+        shard_map(save_samples,
+                  mesh,
+                  in_specs=(P(), P(), P("ensemble"), None),
+                  out_specs=P("ensemble"),
+                  check_rep=False,  # todo:
+                  ),
+        static_argnums=3,
+    )
 
     with metric_writers.ensure_flushes(writer):
         for step in range(1, num_iterations + 1):
@@ -680,12 +765,13 @@ def train(
             if step != 1:
                 with report_progress.timed("load_train_batch"):
                     batch = next(train_iter)
+                    batch = shard_ensemble(batch)
 
             with report_progress.timed("train_step"):
                 if step == 1:
                     logging.info("Calling first `train_step`.")
                 key, subkey = random.split(key)
-                generator_state, discriminator_state, train_metrics = train_step(
+                generator_state, discriminator_state, train_metrics = jit_train_step(
                     subkey,
                     generator_state,
                     discriminator_state,
@@ -707,8 +793,9 @@ def train(
                     all_recons = []
                     for _ in range(2):  # todo: argbind the 2 parameter
                         save_batch = next(sample_iter)
+                        save_batch = shard_ensemble(save_batch)
                         key, subkey = random.split(key)
-                        recons = save_samples(
+                        recons = jit_generate_step(
                             subkey,
                             generator_state,
                             save_batch,
@@ -736,16 +823,17 @@ def train(
                 with report_progress.timed("eval_step"):
                     eval_metrics_all = []
                     with argbind.scope(args, "val"):
-                        eval_iter = create_dataset(batch_size=val_batch_size)
+                        if eval_dataset is None:
+                            eval_dataset = create_dataset(batch_size=val_batch_size)
                     ran_once = False
-                    for test_batch in eval_iter:
+                    for test_batch in iter(eval_dataset):
                         ran_once = True
                         key, subkey = random.split(key)
-                        eval_metrics = eval_step(
+                        eval_metrics = jit_eval_step(
                             subkey,
                             generator_state,
                             discriminator_state,
-                            test_batch,
+                            shard_ensemble(test_batch),
                             SAMPLE_RATE,
                         )
                         eval_metrics_all.append(eval_metrics)
