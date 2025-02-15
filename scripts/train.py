@@ -83,13 +83,19 @@ EarlyStopping = argbind.bind(EarlyStopping)
 n_gpus = jax.device_count()
 devices = mesh_utils.create_device_mesh((n_gpus,))
 
-mesh = Mesh(devices, ("ensemble",))
-data_sharding = NamedSharding(mesh, P("ensemble"))
-replicated_sharding = NamedSharding(mesh, P())
+# Set up device parallelism ("dp") and replication ("rep")
+mesh = Mesh(devices, ("dp",))
+dp_spec = jax.sharding.PartitionSpec("dp")
+rep_spec = jax.sharding.PartitionSpec()
+dp_sharding = jax.sharding.NamedSharding(mesh, dp_spec)
+rep_sharding = jax.sharding.NamedSharding(mesh, rep_spec)
 
 
-def shard_ensemble(x):
-    return jax.device_put(x, data_sharding)
+def shard_dp(x):
+    return jax.device_put(x, dp_sharding)
+
+def shard_replicated(x):
+    return jax.device_put(x, rep_sharding)
 
 
 @argbind.bind("train", "val", "test", "sample")
@@ -246,7 +252,7 @@ def create_generator(
         )
 
     state = TrainState.create(apply_fn=model.apply, params=params, tx=optimizer)
-    state = jax.device_put(state, replicated_sharding)
+    state = shard_replicated(state)
     return state
 
 
@@ -311,7 +317,7 @@ def create_discriminator(
         )
 
     state = TrainState.create(apply_fn=model.apply, params=params, tx=optimizer)
-    state = jax.device_put(state, replicated_sharding)
+    state = shard_replicated(state)
     return state
 
 
@@ -325,7 +331,7 @@ def eval_step(
     lambdas: Mapping[str, float] = None,
 ) -> EvalMetrics:
 
-    rng = jax.random.fold_in(rng, jax.lax.axis_index("ensemble"))
+    rng = jax.random.fold_in(rng, jax.lax.axis_index("dp"))
 
     rng1, rng2 = random.split(rng)
 
@@ -405,6 +411,8 @@ def train_step_discriminator(
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(discriminator.params)
 
+    (loss, grads) = jax.lax.pmean((loss, grads), axis_name="dp")
+
     discriminator = discriminator.apply_gradients(grads=grads)
     return discriminator, loss
 
@@ -454,6 +462,8 @@ def train_step_generator(
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, output), grads = grad_fn(generator.params)
 
+    (output, grads) = jax.lax.pmean((output, grads), axis_name="dp")
+
     generator = generator.apply_gradients(grads=grads)
     return generator, output
 
@@ -468,7 +478,7 @@ def train_step(
 ) -> Tuple[TrainState, TrainState, TrainMetrics]:
     """Train for a single step."""
 
-    key = jax.random.fold_in(key, jax.lax.axis_index("ensemble"))
+    key = jax.random.fold_in(key, jax.lax.axis_index("dp"))
     key, subkey = random.split(key)
 
     audio_tree = augment_batch(subkey, audio_tree)
@@ -660,8 +670,8 @@ def train(
         state = restored.state
         generator_state = state["generator"]
         discriminator_state = state["discriminator"]
-        generator_state = jax.device_put(generator_state, replicated_sharding)
-        discriminator_state = jax.device_put(discriminator_state, replicated_sharding)
+        generator_state = shard_replicated(generator_state)
+        discriminator_state = shard_replicated(discriminator_state)
     else:
         tabulate = bool(tabulate)
 
@@ -733,29 +743,35 @@ def train(
     jit_train_step = jax.jit(
         shard_map(bound_train_step,
                   mesh,
-                  in_specs=(P(), P(), P(), P("ensemble"), None, None),
-                  out_specs=(gen_state_fsdp_specs, disc_state_fsdp_specs, P()),
-                  check_rep=False,  # todo:
+                  in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None, None),
+                  out_specs=(rep_spec, rep_spec, rep_spec),
+                  # check_rep=False,  # todo:
                   ),
+        in_shardings=(rep_sharding, rep_sharding, rep_sharding, dp_sharding, None, None),
+        out_shardings=(rep_sharding, rep_sharding, rep_sharding),
         donate_argnums=(1, 2),
         static_argnums=5,
     )
     jit_eval_step = jax.jit(
         shard_map(bound_eval_step,
                   mesh,
-                  in_specs=(P(), P(), P(), P("ensemble"), None),
-                  out_specs=P(),
-                  check_rep=False,  # todo:
+                  in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None),
+                  out_specs=rep_spec,
+                  # check_rep=False,  # todo:
                   ),
+        in_shardings=(rep_sharding, rep_sharding, rep_sharding, dp_sharding, None),
+        out_shardings=rep_sharding,
         static_argnums=4,
     )
     jit_generate_step = jax.jit(
         shard_map(save_samples,
                   mesh,
-                  in_specs=(P(), P(), P("ensemble"), None),
-                  out_specs=P("ensemble"),
-                  check_rep=False,  # todo:
+                  in_specs=(rep_spec, rep_spec, dp_spec, None),
+                  out_specs=dp_spec,
+                  # check_rep=False,  # todo:
                   ),
+        in_shardings=(rep_sharding, rep_sharding, dp_sharding, None),
+        out_shardings=dp_sharding,
         static_argnums=3,
     )
 
@@ -765,7 +781,7 @@ def train(
             if step != 1:
                 with report_progress.timed("load_train_batch"):
                     batch = next(train_iter)
-                    batch = shard_ensemble(batch)
+                    batch = shard_dp(batch)
 
             with report_progress.timed("train_step"):
                 if step == 1:
@@ -793,7 +809,7 @@ def train(
                     all_recons = []
                     for _ in range(2):  # todo: argbind the 2 parameter
                         save_batch = next(sample_iter)
-                        save_batch = shard_ensemble(save_batch)
+                        save_batch = shard_dp(save_batch)
                         key, subkey = random.split(key)
                         recons = jit_generate_step(
                             subkey,
@@ -833,7 +849,7 @@ def train(
                             subkey,
                             generator_state,
                             discriminator_state,
-                            shard_ensemble(test_batch),
+                            shard_dp(test_batch),
                             SAMPLE_RATE,
                         )
                         eval_metrics_all.append(eval_metrics)
