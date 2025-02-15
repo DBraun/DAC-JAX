@@ -27,14 +27,11 @@ import warnings
 
 import jax
 
-jax.config.update("jax_threefry_partitionable", True)
-assert jax.config.jax_threefry_partitionable is True
-assert jax.config.jax_default_prng_impl == "threefry2x32"
 from jax import numpy as jnp
 from jax import random
 from jax.experimental import mesh_utils
 from jax.experimental.shard_map import shard_map
-from jax.sharding import NamedSharding, Mesh, PartitionSpec as P
+from jax.sharding import Mesh
 
 from absl import logging
 import argbind
@@ -93,6 +90,7 @@ rep_sharding = jax.sharding.NamedSharding(mesh, rep_spec)
 
 def shard_dp(x):
     return jax.device_put(x, dp_sharding)
+
 
 def shard_replicated(x):
     return jax.device_put(x, rep_sharding)
@@ -542,6 +540,25 @@ def save_samples(
     return recons
 
 
+def stack_forest(forest):
+    """Helper function to stack the leaves of a sequence of pytrees.
+
+    Args:
+    forest: a sequence of pytrees (e.g tuple or list) of matching structure
+      whose leaves are arrays with individually matching shapes.
+    Returns:
+    A single pytree of the same structure whose leaves are individually
+      stacked arrays.
+    """
+    stack_args = lambda *args: jnp.stack(args)
+    return jax.tree_util.tree_map(stack_args, *forest)
+
+
+@jax.jit
+def reduce_metrics(metrics: list[Collection]):
+    return stack_forest(metrics).reduce()
+
+
 @argbind.bind()
 def log_training(
     train_metrics: List[TrainMetrics],
@@ -550,7 +567,7 @@ def log_training(
     log_every_steps=1,
 ):
     if log_every_steps and (step % log_every_steps == 0):
-        train_metrics = common_utils.stack_forest(train_metrics).reduce()
+        train_metrics = reduce_metrics(train_metrics)
 
         summary = {}
         summary.update(
@@ -635,15 +652,15 @@ def train(
     create_dataset = partial(_create_dataset, sample_rate=SAMPLE_RATE)
 
     with argbind.scope(args, "train"):
-        train_iter = iter(create_dataset(
-            batch_size=batch_size, train=True, num_steps=num_iterations
-        ))
+        train_iter = iter(
+            create_dataset(batch_size=batch_size, train=True, num_steps=num_iterations)
+        )
 
     with argbind.scope(args, "sample"):
         num_epochs = None  # so that it can iterate forever.
-        sample_iter = iter(create_dataset(
-            batch_size=sample_batch_size, num_epochs=num_epochs
-        ))
+        sample_iter = iter(
+            create_dataset(batch_size=sample_batch_size, num_epochs=num_epochs)
+        )
 
     def best_fn(eval_metrics_summary) -> float:
         return eval_metrics_summary[best_key]
@@ -729,9 +746,6 @@ def train(
     train_metrics_all = []
     eval_dataset = None
 
-    gen_state_fsdp_specs = nn.get_partition_spec(jax.eval_shape(lambda: generator_state))
-    disc_state_fsdp_specs = nn.get_partition_spec(jax.eval_shape(lambda: discriminator_state))
-
     def bound_train_step(*args, **kwargs):
         with argbind.scope(args, "train"):
             return train_step(*args, **kwargs)
@@ -741,35 +755,42 @@ def train(
             return eval_step(*args, **kwargs)
 
     jit_train_step = jax.jit(
-        shard_map(bound_train_step,
-                  mesh,
-                  in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None, None),
-                  out_specs=(rep_spec, rep_spec, rep_spec),
-                  # check_rep=False,  # todo:
-                  ),
-        in_shardings=(rep_sharding, rep_sharding, rep_sharding, dp_sharding, None, None),
+        shard_map(
+            bound_train_step,
+            mesh,
+            in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None, None),
+            out_specs=(rep_spec, rep_spec, rep_spec),
+        ),
+        in_shardings=(
+            rep_sharding,
+            rep_sharding,
+            rep_sharding,
+            dp_sharding,
+            None,
+            None,
+        ),
         out_shardings=(rep_sharding, rep_sharding, rep_sharding),
         donate_argnums=(1, 2),
         static_argnums=5,
     )
     jit_eval_step = jax.jit(
-        shard_map(bound_eval_step,
-                  mesh,
-                  in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None),
-                  out_specs=rep_spec,
-                  # check_rep=False,  # todo:
-                  ),
+        shard_map(
+            bound_eval_step,
+            mesh,
+            in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None),
+            out_specs=rep_spec,
+        ),
         in_shardings=(rep_sharding, rep_sharding, rep_sharding, dp_sharding, None),
         out_shardings=rep_sharding,
         static_argnums=4,
     )
     jit_generate_step = jax.jit(
-        shard_map(save_samples,
-                  mesh,
-                  in_specs=(rep_spec, rep_spec, dp_spec, None),
-                  out_specs=dp_spec,
-                  # check_rep=False,  # todo:
-                  ),
+        shard_map(
+            save_samples,
+            mesh,
+            in_specs=(rep_spec, rep_spec, dp_spec, None),
+            out_specs=dp_spec,
+        ),
         in_shardings=(rep_sharding, rep_sharding, dp_sharding, None),
         out_shardings=dp_sharding,
         static_argnums=3,
