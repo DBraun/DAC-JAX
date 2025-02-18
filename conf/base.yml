@@ -93,16 +93,16 @@ VolumeNorm.config:
   min_db: -16
   max_db: -16
 
-train/build_transforms.augment:
+train/augment_batch.transforms:
   - VolumeNorm
   - RescaleAudio
   - ShiftPhase
 
-val/build_transforms.augment:
+val/augment_batch.transforms:
   - VolumeNorm
   - RescaleAudio
 
-sample/build_transforms.augment:
+sample/augment_batch.transforms:
   - VolumeNorm
   - RescaleAudio
 
@@ -114,6 +114,9 @@ SaliencyParams.loudness_cutoff: -40
 SaliencyParams.search_function: SaliencyParams.search_uniform
 
 # Data
+create_dataset.worker_count: 0
+create_dataset.worker_buffer_size: 1
+
 create_dataset.extensions:
   - .wav
   - .flac

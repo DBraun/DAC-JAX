@@ -211,7 +211,7 @@ class Encoder(nn.Module):
 
         # Wrap black into nn.Sequential
         block = nn.Sequential(block)
-        x = rearrange(x, "b c l -> b l c")
+        x = rearrange(x, "b c l -> b l c", c=1)
         x = block(x)
         return x
 
