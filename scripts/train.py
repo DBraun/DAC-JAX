@@ -4,10 +4,6 @@ import os
 
 XLA_FLAGS = []
 
-FORCE_DEVICE_COUNT = 0  # todo:
-if FORCE_DEVICE_COUNT:
-    XLA_FLAGS.append(f"--xla_force_host_platform_device_count={FORCE_DEVICE_COUNT}")
-
 DETERMINISTIC = False  # todo:
 if DETERMINISTIC:
     # Deterministic will be slower.
@@ -27,6 +23,12 @@ import warnings
 
 import jax
 
+slurm_num_nodes = os.environ.get("SLURM_JOB_NUM_NODES", 0)
+if slurm_num_nodes:
+    SLURM_GPUS_ON_NODE = os.environ["SLURM_GPUS_ON_NODE"]
+    jax.distributed.initialize(local_device_ids=list(range(int(SLURM_GPUS_ON_NODE))))
+
+
 from jax import numpy as jnp
 from jax import random
 from jax.experimental import mesh_utils
@@ -40,7 +42,6 @@ from audiotree import transforms as transforms_lib
 from clu import metric_writers, periodic_actions
 from clu.metrics import Average, Collection
 from einops import rearrange
-from flax import linen as nn
 from flax import struct
 from flax.training import common_utils
 from flax.training.early_stopping import EarlyStopping
@@ -103,8 +104,10 @@ def augment_batch(
     transforms: list[str] = None,
 ) -> AudioTree:
     """
+    :param rng: A jax.random.PRNGKey
+    :param batch: An AudioTree
     :param transforms: A list of str names of Transforms (from ``audiotree.transforms``) such as VolumeNorm
-    :return: audio latents
+    :return: an AudioTree with the specified transforms applied.
     """
 
     transforms = transforms or []
@@ -350,9 +353,6 @@ def eval_step(
     )
     recons = q_res.recons
     output = {
-        "z": q_res.z,
-        "codes": q_res.codes,
-        "latents": q_res.latents,
         "vq/commitment_loss": q_res.commitment_loss,
         "vq/codebook_loss": q_res.codebook_loss,
     }
@@ -374,6 +374,8 @@ def eval_step(
 
     output["loss"] = sum([v * output[k] for k, v in lambdas.items()])
 
+    output = jax.lax.pmean(output, axis_name="dp")
+
     eval_metrics = EvalMetrics.single_from_model_output(**output)
 
     return eval_metrics
@@ -384,7 +386,7 @@ def train_step_discriminator(
     generator: TrainState,
     discriminator: TrainState,
     audio_data: jnp.ndarray,
-    sample_rate,
+    sample_rate: int,
 ) -> Tuple[Discriminator, struct.PyTreeNode]:
 
     def loss_fn(params):
@@ -520,10 +522,10 @@ def save_checkpoint(
         checkpoint_manager.wait_until_finished()
 
 
-def save_samples(
+def generate_step(
     rng: jax.Array, generator: TrainState, audio_tree: AudioTree, sample_rate: int
 ):
-    """Save audio samples to tensorboard."""
+    """Encode and reconstruct audio."""
     audio_data = audio_tree.audio_data
     batch_size = audio_data.shape[0]
     audio_data = rearrange(audio_data, "b c t -> (b c) 1 t", c=1)
@@ -609,11 +611,11 @@ def train(
     val_batch_size: int = 1,
     sample_batch_size: int = 1,
     restore: int = 0,  # bool
-    best_key="eval/loss",
-    best_mode="min",
+    best_key: str = "eval/loss",
+    best_mode: str = "min",
     enable_async_checkpointing: int = 1,  # bool
-    log_level="info",
-    ckpt_dir="/tmp/dac_jax_runs",
+    log_level: str = "info",
+    ckpt_dir: str = "/tmp/dac_jax_runs",
     tabulate: int = 0,  # bool
 ):
 
@@ -746,19 +748,19 @@ def train(
     train_metrics_all = []
     eval_dataset = None
 
-    def bound_train_step(*args, **kwargs):
+    def bound_train_step(*tmp_args, **kwargs):
         with argbind.scope(args, "train"):
-            return train_step(*args, **kwargs)
+            return train_step(*tmp_args, sample_rate=SAMPLE_RATE, **kwargs)
 
-    def bound_eval_step(*args, **kwargs):
+    def bound_eval_step(*tmp_args, **kwargs):
         with argbind.scope(args, "val"):
-            return eval_step(*args, **kwargs)
+            return eval_step(*tmp_args, sample_rate=SAMPLE_RATE, **kwargs)
 
     jit_train_step = jax.jit(
         shard_map(
             bound_train_step,
             mesh,
-            in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None, None),
+            in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None),
             out_specs=(rep_spec, rep_spec, rep_spec),
         ),
         in_shardings=(
@@ -766,7 +768,6 @@ def train(
             rep_sharding,
             rep_sharding,
             dp_sharding,
-            None,
             None,
         ),
         out_shardings=(rep_sharding, rep_sharding, rep_sharding),
@@ -777,21 +778,20 @@ def train(
         shard_map(
             bound_eval_step,
             mesh,
-            in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None),
+            in_specs=(rep_spec, rep_spec, rep_spec, dp_spec),
             out_specs=rep_spec,
         ),
-        in_shardings=(rep_sharding, rep_sharding, rep_sharding, dp_sharding, None),
+        in_shardings=(rep_sharding, rep_sharding, rep_sharding, dp_sharding),
         out_shardings=rep_sharding,
-        static_argnums=4,
     )
     jit_generate_step = jax.jit(
         shard_map(
-            save_samples,
+            generate_step,
             mesh,
             in_specs=(rep_spec, rep_spec, dp_spec, None),
             out_specs=dp_spec,
         ),
-        in_shardings=(rep_sharding, rep_sharding, dp_sharding, None),
+        in_shardings=(rep_sharding, rep_sharding, dp_sharding),
         out_shardings=dp_sharding,
         static_argnums=3,
     )
@@ -814,7 +814,6 @@ def train(
                     discriminator_state,
                     batch,
                     step,
-                    SAMPLE_RATE,
                 )
 
                 train_metrics_all.append(train_metrics)
@@ -825,7 +824,7 @@ def train(
             train_metrics_all = log_training(train_metrics_all, step, writer)
 
             if step % sample_freq == 0:
-                with report_progress.timed("sample_step"):
+                with report_progress.timed("generate_step"):
                     all_signal = []
                     all_recons = []
                     for _ in range(2):  # todo: argbind the 2 parameter
@@ -871,7 +870,6 @@ def train(
                             generator_state,
                             discriminator_state,
                             shard_dp(test_batch),
-                            SAMPLE_RATE,
                         )
                         eval_metrics_all.append(eval_metrics)
                     assert ran_once

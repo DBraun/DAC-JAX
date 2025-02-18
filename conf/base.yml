@@ -114,6 +114,9 @@ SaliencyParams.loudness_cutoff: -40
 SaliencyParams.search_function: SaliencyParams.search_uniform
 
 # Data
+create_dataset.worker_count: 0
+create_dataset.worker_buffer_size: 1
+
 create_dataset.extensions:
   - .wav
   - .flac

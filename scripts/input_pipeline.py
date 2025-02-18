@@ -35,7 +35,7 @@ def create_dataset(
         assert num_steps is not None and num_steps > 0
         datasource = AudioDataBalancedSource(
             sources=sources,
-            num_steps=num_steps * batch_size,
+            num_records=num_steps * batch_size,
             sample_rate=sample_rate,
             mono=mono,
             duration=duration,
@@ -45,7 +45,7 @@ def create_dataset(
     else:
         datasource = AudioDataSimpleSource(
             sources=sources,
-            num_steps=num_steps * batch_size if num_steps is not None else None,
+            num_records=num_steps * batch_size if num_steps is not None else None,
             sample_rate=sample_rate,
             mono=mono,
             duration=duration,
@@ -64,7 +64,7 @@ def create_dataset(
 
     pygrain_ops = [
         grain.Batch(batch_size=batch_size, drop_remainder=True),
-        ReduceBatchTransform(sample_rate),
+        ReduceBatchTransform(),
     ]
 
     dataloader = grain.DataLoader(
@@ -83,13 +83,12 @@ def create_dataset(
 if __name__ == "__main__":
 
     from tqdm import tqdm
-    from audiotree.transforms import VolumeNorm, RescaleAudio, SwapStereo, InvertPhase
     from absl import logging
 
     logging.set_verbosity(logging.INFO)
 
-    folder1 = "/mnt/c/users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Bass-Bass3-bass-10-syx-01-SUPERBASS2-note69"
-    folder2 = "/mnt/c/Users/braun/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Accordion-ACCORD01-SYX-06-AKKORDEON-note69"
+    folder1 = "/mnt/d/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Bass-Bass3-bass-10-syx-01-SUPERBASS2-note69"
+    folder2 = "/mnt/d/Datasets/dx7/patches-DX7-AllTheWeb-Bridge-Music-Recording-Studio-Sysex-Set-4-Instruments-Accordion-ACCORD01-SYX-06-AKKORDEON-note69"
 
     sources = {
         "a": [folder1],
@@ -99,23 +98,17 @@ if __name__ == "__main__":
     num_steps = 1000
 
     ds = create_dataset(
+        batch_size=32,
+        sample_rate=44_100,
         sources=sources,
         duration=0.5,
         train=True,
-        batch_size=32,
-        sample_rate=44_100,
         mono=True,
         seed=0,
         num_steps=num_steps,
         extensions=None,
         worker_count=0,
         worker_buffer_size=1,
-        transforms=[
-            VolumeNorm(),
-            RescaleAudio(),
-            SwapStereo(),
-            InvertPhase(),
-        ],
         saliency_params=SaliencyParams(False, 8, -70),
     )
 
