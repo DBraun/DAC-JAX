@@ -3,6 +3,7 @@ import sys
 import argbind
 
 from dac_jax.utils import download_model
+from dac_jax.utils import download_encodec
 from dac_jax.utils.decode import decode
 from dac_jax.utils.encode import encode
 
