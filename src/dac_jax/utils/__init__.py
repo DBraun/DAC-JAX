@@ -2,8 +2,10 @@ import os
 from os import environ
 from pathlib import Path
 import json
+import typing as tp
 
 import argbind
+from huggingface_hub import hf_hub_download
 import numpy as np
 from omegaconf import OmegaConf
 import torch
@@ -13,6 +15,48 @@ from dac_jax.utils import load_torch_weights
 from dac_jax.model import DAC
 from dac_jax.model import EncodecModel, SEANetEncoder, SEANetDecoder
 from dac_jax.nn.encodec_quantize import ResidualVectorQuantizer
+
+
+def get_audiocraft_cache_dir() -> tp.Optional[str]:
+    return os.environ.get('AUDIOCRAFT_CACHE_DIR', None)
+
+
+def _get_state_dict(
+    file_or_url_or_id: tp.Union[Path, str],
+    filename: tp.Optional[str] = None,
+    device='cpu',
+    cache_dir: tp.Optional[str] = None,
+):
+    if cache_dir is None:
+        cache_dir = get_audiocraft_cache_dir()
+    # Return the state dict either from a file or url
+    file_or_url_or_id = str(file_or_url_or_id)
+    assert isinstance(file_or_url_or_id, str)
+
+    if os.path.isfile(file_or_url_or_id):
+        return torch.load(file_or_url_or_id, map_location=device)
+
+    if os.path.isdir(file_or_url_or_id):
+        file = f"{file_or_url_or_id}/{filename}"
+        return torch.load(file, map_location=device)
+
+    elif file_or_url_or_id.startswith('https://'):
+        return torch.hub.load_state_dict_from_url(file_or_url_or_id, map_location=device, check_hash=True)
+
+    else:
+        assert filename is not None, "filename needs to be defined if using HF checkpoints"
+
+        file = hf_hub_download(
+            repo_id=file_or_url_or_id, filename=filename, cache_dir=cache_dir,
+            library_name="audiocraft", library_version="1.3.0")
+        return torch.load(file, map_location=device)
+
+
+try:
+    from audiocraft.models.loaders import load_compression_model_ckpt
+except Exception as e:
+    def load_compression_model_ckpt(file_or_url_or_id: tp.Union[Path, str], cache_dir: tp.Optional[str] = None):
+        return _get_state_dict(file_or_url_or_id, filename="compression_state_dict.bin", cache_dir=cache_dir)
 
 
 __MODEL_LATEST_TAGS__ = {
@@ -98,8 +142,6 @@ def download_encodec(
 
     if not torch_model_path.exists():
         torch_model_path.parent.mkdir(parents=True, exist_ok=True)
-
-        from audiocraft.models.loaders import load_compression_model_ckpt
 
         file_or_url_or_id = name
         pkg = load_compression_model_ckpt(file_or_url_or_id, cache_dir=str(cache_home))
