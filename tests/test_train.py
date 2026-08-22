@@ -1,88 +1,85 @@
 """
-Tests for CLI.
+Smoke test for scripts/train.py.
+
+Runs a couple of real training iterations of a deliberately tiny model
+(conf/mini.yml) over a small synthetic dataset, so that the data pipeline,
+augmentation, generator/discriminator updates, evaluation, sampling and
+checkpointing all get exercised.
 """
 
 import os
-import shlex
-import subprocess
 from pathlib import Path
+import shlex
+import shutil
+import subprocess
 
 import argbind
 import numpy as np
-from audiotools import AudioSignal
+import soundfile
 
-from dac_jax.__main__ import run
+SAMPLE_RATE = 16_000
+GROUPS = ["speech", "music", "env"]
+SPLITS = ["train", "val", "test"]
 
 
-def make_fake_data(data_dir=Path(__file__).parent / "tmp_assets"):
+def make_fake_data(data_dir: Path, num_files: int = 4):
     data_dir.mkdir(exist_ok=True, parents=True)
-    input_dir = data_dir / "input"
-    input_dir.mkdir(exist_ok=True, parents=True)
-
-    for i in range(100):
-        signal = AudioSignal(np.random.randn(44_100 * 5), 44_100)
-        signal.write(input_dir / f"sample_{i}.wav")
-    return input_dir
+    rng = np.random.default_rng(0)
+    for i in range(num_files):
+        signal = rng.uniform(-0.5, 0.5, size=SAMPLE_RATE)
+        soundfile.write(data_dir / f"sample_{i}.wav", signal, samplerate=SAMPLE_RATE)
+    return data_dir
 
 
-def make_fake_data_tree():
-    data_dir = Path(__file__).parent / "tmp_assets"
-
-    for relative_dir in [
-        "train/speech",
-        "train/music",
-        "train/env",
-        "val/speech",
-        "val/music",
-        "val/env",
-        "test/speech",
-        "test/music",
-        "test/env",
-    ]:
-        leaf_dir = data_dir / relative_dir
-        leaf_dir.mkdir(exist_ok=True, parents=True)
-        make_fake_data(leaf_dir)
+def make_fake_data_tree(data_dir: Path):
+    for split in SPLITS:
+        for group in GROUPS:
+            make_fake_data(data_dir / split / group)
     return {
-        split: {
-            key: [str(data_dir / f"{split}/{key}")]
-            for key in ["speech", "music", "env"]
-        }
-        for split in ["train", "val", "test"]
+        split: {group: [str(data_dir / split / group)] for group in GROUPS}
+        for split in SPLITS
     }
 
 
 def setup_module(module):
-    # Make fake dataset dir
-    input_datasets = make_fake_data_tree()
+    tmp_dir = Path(__file__).parent / "tmp_assets"
     repo_root = Path(__file__).parent.parent
 
-    # Load baseline conf and modify it for testing
-    conf = argbind.load_args(repo_root / "conf" / "ablations" / "baseline.yml")
+    input_datasets = make_fake_data_tree(tmp_dir)
 
-    for key in ["train", "val", "test"]:
-        conf[f"{key}/build_dataset.folders"] = input_datasets[key]
-    conf["num_iters"] = 1
-    conf["val/AudioDataset.n_examples"] = 1
-    conf["val_idx"] = [0]
-    conf["val_batch_size"] = 1
+    conf = argbind.load_args(repo_root / "conf" / "mini.yml")
+    # `sample` draws from the validation split, the same way conf/base.yml does.
+    for scope, split in [
+        ("train", "train"),
+        ("val", "val"),
+        ("test", "test"),
+        ("gen", "val"),
+    ]:
+        conf[f"{scope}/create_dataset.sources"] = input_datasets[split]
 
-    argbind.dump_args(conf, Path(__file__).parent / "tmp_assets" / "conf.yml")
+    argbind.dump_args(conf, tmp_dir / "conf.yml")
 
 
 def teardown_module(module):
     repo_root = Path(__file__).parent.parent
-    # Remove fake dataset dir
-    subprocess.check_output(["rm", "-rf", f"{repo_root}/tests/tmp_assets"])
-    subprocess.check_output(["rm", "-rf", f"{repo_root}/tests/runs"])
+    shutil.rmtree(repo_root / "tests" / "tmp_assets", ignore_errors=True)
+    shutil.rmtree(repo_root / "tests" / "runs", ignore_errors=True)
 
 
 def test_single_gpu_train():
     env = os.environ.copy()
     repo_root = Path(__file__).parent.parent
+    conf_path = repo_root / "tests" / "tmp_assets" / "conf.yml"
+    ckpt_dir = repo_root / "tests" / "runs"
     args = shlex.split(
-        f"python {repo_root}/scripts/train.py --args.load {repo_root}/tests/assets/conf.yml --train.save_path {repo_root}/tests/runs/baseline"
+        f"python {repo_root}/scripts/train.py"
+        f" --args.load {conf_path}"
+        f" --train.ckpt_dir {ckpt_dir}"
+        f" --train.name baseline"
     )
-    subprocess.check_output(args, env=env)
+    subprocess.run(args, env=env, check=True)
+
+    assert (ckpt_dir / "baseline" / "orbax").is_dir()
 
 
 def test_multi_gpu_train():

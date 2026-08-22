@@ -89,29 +89,35 @@ mel_spectrogram_loss.clamp_eps: 1.0e-5
 mel_spectrogram_loss.mag_weight: 0.0
 
 # Data Augmentation
-VolumeNorm.config:
-  min_db: -16
-  max_db: -16
+volume_norm.min_db: -16
+volume_norm.max_db: -16
 
 train/augment_batch.transforms:
-  - VolumeNorm
-  - RescaleAudio
-  - ShiftPhase
+  - volume_norm
+  - rescale_audio
+  - shift_phase
 
 val/augment_batch.transforms:
-  - VolumeNorm
-  - RescaleAudio
+  - volume_norm
+  - rescale_audio
 
-sample/augment_batch.transforms:
-  - VolumeNorm
-  - RescaleAudio
+gen/augment_batch.transforms:
+  - volume_norm
+  - rescale_audio
 
 # Data
-# This should be equivalent to how DAC used salient_excerpt from AudioTools.
-SaliencyParams.enabled: 1
-SaliencyParams.num_tries: 8
-SaliencyParams.loudness_cutoff: -40
-SaliencyParams.search_function: SaliencyParams.search_uniform
+# This should be equivalent to how DAC used salient_excerpt from AudioTools:
+# AudioLoader defaults to loudness_cutoff=-40 and salient_excerpt to num_tries=8.
+train/ExcerptConfig.strategy: loudest
+train/ExcerptConfig.num_tries: 8
+train/ExcerptConfig.lufs_cutoff: -40
+train/ExcerptConfig.search: uniform
+
+# Read from the start of each file so every evaluation sees identical audio.
+# This is what the pre-1.0 audiotree data sources did for every split.
+val/ExcerptConfig.strategy: start
+test/ExcerptConfig.strategy: start
+gen/ExcerptConfig.strategy: start
 
 # Data
 create_dataset.worker_count: 0
@@ -125,7 +131,7 @@ create_dataset.extensions:
 
 train/create_dataset.duration: 0.38
 val/create_dataset.duration: 5.0
-sample/create_dataset.duration: 5.0
+gen/create_dataset.duration: 5.0
 test/create_dataset.duration: 10.0
 
 val/create_dataset.num_steps: 4
@@ -160,7 +166,7 @@ val/create_dataset.sources:
   general:
     - /data/audioset/data/eval_segments/
 
-sample/create_dataset.sources:
+gen/create_dataset.sources:
   speech_hq:
     - /data/daps/val
   music_hq:

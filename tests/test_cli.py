@@ -21,7 +21,10 @@ def setup_module(module):
 
     for i in range(5):
         sample_rate = 44_100
-        signal = np.random.randn(1000, sample_rate)
+        # soundfile reads this as (frames, channels), so the axes were the wrong
+        # way round: it asked libsndfile for a 44100-channel WAV and got a
+        # zero-byte file. Mono, five seconds, matching tests/test_train.py.
+        signal = np.random.randn(sample_rate * 5)
         soundfile.write(input_dir / f"sample_{i}.wav", signal, samplerate=sample_rate)
     return input_dir
 
@@ -74,8 +77,9 @@ def test_compression():
     artifacts = np.load(dac_file, allow_pickle=allow_pickle)[()]
     codes = artifacts["codes"]
 
-    # Ensure that the number of quantizers is correct
-    assert codes.shape[2] == 3
+    # Ensure that the number of quantizers is correct. Codes are
+    # (batch, n_quantizers, time), so the quantizer count is axis 1.
+    assert codes.shape[1] == 3
 
     # Ensure that dtype of compression is uint16
     assert codes.dtype == np.uint16

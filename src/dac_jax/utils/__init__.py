@@ -8,7 +8,6 @@ import argbind
 from huggingface_hub import hf_hub_download
 import numpy as np
 from omegaconf import OmegaConf
-import torch
 
 from dac_jax.utils import load_torch_weights_encodec
 from dac_jax.utils import load_torch_weights
@@ -27,6 +26,10 @@ def _get_state_dict(
     device='cpu',
     cache_dir: tp.Optional[str] = None,
 ):
+    # Imported lazily: torch is only needed to read the pretrained Descript and
+    # Meta checkpoints, so the rest of dac_jax works without it installed.
+    import torch
+
     if cache_dir is None:
         cache_dir = get_audiocraft_cache_dir()
     # Return the state dict either from a file or url
@@ -93,6 +96,7 @@ __MODEL_URLS__ = {
 def convert_torch_weights_to_numpy(
     torch_weights_path: Path, write_path: Path, metadata_path: Path
 ):
+    import torch  # lazy; see _get_state_dict
 
     if write_path.exists() and metadata_path.exists():
         return

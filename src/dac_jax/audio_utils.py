@@ -4,12 +4,12 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import chex
-import dm_aux as aux
 from einops import rearrange
 import jax.numpy as jnp
 import jax.scipy.signal
 import jaxloudnorm as jln
 import librosa
+import librosax
 
 
 def find_audio(folder: Union[str, Path], ext: List[str] = None) -> List[Path]:
@@ -92,7 +92,7 @@ def stft(
     https://github.com/descriptinc/audiotools/blob/7776c296c711db90176a63ff808c26e0ee087263/audiotools/core/audio_signal.py#L1123
     """
 
-    batch_size, num_channels, audio_length = x.shape
+    audio_length = x.shape[-1]
 
     frame_step = int(frame_length * hop_factor)
 
@@ -103,23 +103,16 @@ def stft(
         x, pad_width=((0, 0), (0, 0), (pad, pad + right_pad)), mode=padding_type
     )
 
-    x = rearrange(x, "b c t -> (b c) t")
-
-    if window == "sqrt_hann":
-        from scipy import signal as scipy_signal
-
-        window = jnp.sqrt(scipy_signal.get_window("hann", frame_length))
-
-    # todo: https://github.com/google-deepmind/dm_aux/issues/2
-    stft_data = aux.spectral.stft(
+    # librosax takes (batch, channels, samples) and returns (batch, channels,
+    # freq, frames), and knows "sqrt_hann" natively.
+    stft_data = librosax.stft(
         x,
         n_fft=frame_length,
-        frame_step=frame_step,
-        window_fn=window,
+        hop_length=frame_step,
+        window=window,
+        center=True,
         pad_mode=padding_type,
-        pad=aux.spectral.Pad.BOTH,
     )
-    stft_data = rearrange(stft_data, "(b c) nt nf -> b c nf nt", b=batch_size)
 
     if match_stride:
         # Drop first two and last two frames, which are added
@@ -261,10 +254,9 @@ def volume_norm(
         zeros=zeros,
     )
 
-    # measure loudness
-    loudness = jax.vmap(meter.integrated_loudness)(
-        rearrange(padded_audio, "b c t -> b t c")
-    )
+    # measure loudness. jaxloudnorm takes (channels, samples) per item, which is
+    # already the layout of `padded_audio` minus its batch axis.
+    loudness = jax.vmap(meter.integrated_loudness)(padded_audio)
 
     loudness = jnp.maximum(loudness, jnp.full_like(loudness, min_loudness))
 

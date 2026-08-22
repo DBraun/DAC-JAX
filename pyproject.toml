@@ -1,3 +1,82 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "dac_jax"
+dynamic = ["version"]
+description = "Descript Audio Codec and EnCodec in JAX."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "David Braun", email = "braun@ccrma.stanford.edu" }]
+requires-python = ">=3.12"
+keywords = ["audio", "compression", "machine learning"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Artistic Software",
+    "Topic :: Multimedia",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Sound/Audio :: Editors",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "argbind-dbraun>=0.6.0",
+    "audiotree>=1.0.0",
+    "chex",
+    "einops>=0.8.0",
+    "flax>=0.12.9",
+    "huggingface-hub",
+    "jax>=0.11.1",
+    "jaxlib>=0.11.1",
+    "jaxloudnorm>=0.3.2",
+    "librosa>=0.10.1",
+    "librosax>=0.1.2",
+    "numpy>=2.1.3",
+    "omegaconf",
+    "soundfile",
+    "tqdm>=4.66.4",
+]
+
+[project.optional-dependencies]
+# Everything scripts/train.py and scripts/input_pipeline.py need on top of the
+# library itself. None of it is imported by `dac_jax`.
+train = [
+    "absl-py",
+    "clu>=0.0.12",
+    "grain>=0.2.18",
+    "optax>=0.2.6",
+    "orbax-checkpoint",
+    "tensorboardX",
+]
+# Training, plus the test suite and the PyTorch reference implementations it
+# compares against.
+dev = [
+    "dac_jax[train]",
+    "descript-audio-codec",
+    "descript-audiotools",
+    "encodec",
+    "pandas",
+    "pesq",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
+
+[project.urls]
+Homepage = "https://github.com/DBraun/DAC-JAX"
+Repository = "https://github.com/DBraun/DAC-JAX"
+
+[tool.setuptools.dynamic]
+version = { attr = "dac_jax.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv]
+# descript-audiotools (a dev-only reference implementation) is unmaintained and
+# pins `protobuf<3.20`, which contradicts grain's `protobuf>=5.28.3`.
+override-dependencies = ["protobuf>=5.28.3"]

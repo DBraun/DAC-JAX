@@ -20,38 +20,59 @@ encoder-decoder architecture.
 
 ### Installation
 
-1. Upgrade `pip` and `setuptools`:
-    ```bash
-    pip install --upgrade pip setuptools
-    ```
+DAC-JAX requires **Python 3.12 or newer**.
 
-2. Install the **CPU** version of [PyTorch](https://pytorch.org/).
-   We strongly suggest the CPU version because trying to install a GPU version can conflict with JAX's CUDA-related installation.
-   PyTorch is required because it's used to load pretrained model weights.
+The project is managed with [uv](https://docs.astral.sh/uv/). To work on it, clone
+the repository and let `uv` build the environment from `uv.lock`:
 
-3. Install [JAX](https://jax.readthedocs.io/en/latest/installation.html) (with GPU support).
+```bash
+git clone https://github.com/DBraun/DAC-JAX
+cd DAC-JAX
+uv sync --extra dev
+```
 
-4. Install DAC-JAX with one of the following:
+That gives you a reproducible environment with everything: the library, the
+training stack, the test suite and the PyTorch reference implementations it
+compares against. Run anything inside it with `uv run`, e.g. `uv run pytest
+tests`, and add or change dependencies with `uv add` / `uv remove` rather than by
+editing `pyproject.toml` by hand.
 
-    <!-- ```
-    python -m pip install dac-jax
-    ```
-    OR -->
-    
-    ```
-    pip install git+https://github.com/DBraun/DAC-JAX
-    ```
-    
-    Or,
-    
-    ```bash
-    python -m pip install .
-    ```
-    
-    Or, if you intend to contribute, clone and do an [editable install](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs):
-    ```bash
-    python -m pip install -e ".[dev]"
-    ```
+There are two extras:
+
+| Extra   | Adds                                                                  |
+| ------- | --------------------------------------------------------------------- |
+| `train` | What `scripts/train.py` needs -- grain, clu, optax, orbax, tensorboardX |
+| `dev`   | `train`, plus pytest, ruff, and the PyTorch reference implementations  |
+
+The library itself imports none of that, so plain `dac-jax` stays light. To
+train without the test dependencies, use `uv sync --extra train`.
+
+To use DAC-JAX as a dependency of your own project:
+
+```bash
+uv add "dac-jax @ git+https://github.com/DBraun/DAC-JAX"
+```
+
+<!-- ```bash
+uv add dac-jax
+``` -->
+
+Or, with pip:
+
+```bash
+python -m pip install git+https://github.com/DBraun/DAC-JAX
+```
+
+Two notes on the dependencies:
+
+* **PyTorch** is not declared as a dependency and is imported lazily. It is only
+  needed the first time you download a pretrained Descript or Meta checkpoint, to
+  read it and convert it to `.npy`; everything else works without it. Install it
+  yourself, and prefer the **CPU** build -- a GPU build can conflict with JAX's
+  CUDA installation. (The `dev` extra installs it anyway, since the equivalence
+  tests compare against the PyTorch implementations.)
+* For **GPU support**, install [JAX](https://jax.readthedocs.io/en/latest/installation.html)
+  with the appropriate CUDA extra; the lockfile pins the CPU build.
 
 ### Weights
 The original Descript repository releases model weights under the MIT license. These weights are for models that natively support 16 kHz, 24kHz, and 44.1kHz sampling rates. Our scripts download these PyTorch weights and load them into JAX.
@@ -244,9 +265,13 @@ tensorboard --logdir="/tmp/dac_jax_runs"
 
 ## Testing
 
+```bash
+uv run pytest tests
 ```
-python -m pytest tests
-```
+
+`tests/test_encodec_equivalence.py` compares against the PyTorch EnCodec inside
+[audiocraft](https://github.com/facebookresearch/audiocraft), which is not a
+dependency of this project; it skips itself when audiocraft is not installed.
 
 ## Limitations
 
@@ -258,7 +283,7 @@ Pull requests—especially ones which address any of the limitations below—are
 * In `audio_utils.py` we use [DM_AUX's](https://github.com/google-deepmind/dm_aux) STFT function instead of `jax.scipy.signal.stft`. We believe this is faster but requires more memory.
 * The source code of DAC-JAX has some `todo:` markings which indicate (mostly minor) improvements we'd like to have.
 * We don't have a Docker image yet like the original [DAC repository](https://github.com/descriptinc/descript-audio-codec) does.
-* Please check the limitations of [argbind](https://github.com/pseeth/argbind?tab=readme-ov-file#limitations-and-known-issues).
+* Please check the limitations of [argbind-dbraun](https://github.com/DBraun/argbind?tab=readme-ov-file#limitations-and-known-issues), the fork of argbind that this project uses.
 * We don't provide a training script for EnCodec.
 
 ## Citation

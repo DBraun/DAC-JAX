@@ -39,8 +39,22 @@ def normalize(x, ord=2, axis=1, eps=1e-12):
     Reference:
     https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
     """
-    denom = jnp.linalg.norm(x, ord=ord, axis=axis, keepdims=True)
-    denom = jnp.maximum(eps, denom)
+    if ord == 2:
+        # Clamping *inside* the square root, rather than clamping the norm
+        # afterwards, is what keeps the gradient finite. `jnp.linalg.norm` is
+        # `sqrt(sum(x**2))`, whose derivative is infinite at x = 0, and
+        # `jnp.maximum` contributes a local gradient of 0 there -- so the chain
+        # rule multiplies 0 by infinity and yields NaN even though the forward
+        # value is fine. A zero vector is reachable here: a codebook entry that
+        # goes unused can be decayed to exactly zero.
+        # https://docs.jax.dev/en/latest/faq.html#gradients-contain-nan-where-using-where
+        #
+        # sqrt(max(s, eps**2)) == max(sqrt(s), eps), so the forward value is
+        # unchanged.
+        square_sum = jnp.sum(jnp.square(x), axis=axis, keepdims=True)
+        denom = jnp.sqrt(jnp.maximum(square_sum, eps * eps))
+    else:
+        denom = jnp.maximum(eps, jnp.linalg.norm(x, ord=ord, axis=axis, keepdims=True))
     return x / denom
 
 

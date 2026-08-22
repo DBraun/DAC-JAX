@@ -15,9 +15,12 @@ if DETERMINISTIC:
 if XLA_FLAGS:
     os.environ["XLA_FLAGS"] = " " + " ".join(XLA_FLAGS)
 
+import collections
+import contextlib
 import datetime
 from functools import partial
 import shutil
+import time
 from typing import List, Mapping, Tuple
 import warnings
 
@@ -32,24 +35,23 @@ if slurm_num_nodes:
 from jax import numpy as jnp
 from jax import random
 from jax.experimental import mesh_utils
-from jax.experimental.shard_map import shard_map
+from jax import shard_map
 from jax.sharding import Mesh
 
 from absl import logging
 import argbind
 from audiotree import AudioTree
-from audiotree import transforms as transforms_lib
-from clu import metric_writers, periodic_actions
+from audiotree.transforms import jax as jax_transforms
 from clu.metrics import Average, Collection
 from einops import rearrange
 from flax import struct
 from flax.training import common_utils
 from flax.training.early_stopping import EarlyStopping
 from flax.training.train_state import TrainState
-from grain import python as grain
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
+from tensorboardX import SummaryWriter
 
 from dac_jax import load_model
 from dac_jax.model import DAC, Discriminator
@@ -78,6 +80,10 @@ mel_spectrogram_loss = argbind.bind(mel_spectrogram_loss)
 
 EarlyStopping = argbind.bind(EarlyStopping)
 
+# Data augmentation. Binding the module exposes every transform's parameters to
+# YAML, e.g. `volume_norm.min_db`.
+transforms_lib = argbind.bind_module(jax_transforms)
+
 n_gpus = jax.device_count()
 devices = mesh_utils.create_device_mesh((n_gpus,))
 
@@ -97,7 +103,7 @@ def shard_replicated(x):
     return jax.device_put(x, rep_sharding)
 
 
-@argbind.bind("train", "val", "test", "sample")
+@argbind.bind("train", "val", "test", "gen")
 def augment_batch(
     rng: jax.Array,
     batch: AudioTree,
@@ -106,7 +112,7 @@ def augment_batch(
     """
     :param rng: A jax.random.PRNGKey
     :param batch: An AudioTree
-    :param transforms: A list of str names of Transforms (from ``audiotree.transforms``) such as VolumeNorm
+    :param transforms: A list of str names of transforms (from ``audiotree.transforms.jax``) such as volume_norm
     :return: an AudioTree with the specified transforms applied.
     """
 
@@ -114,16 +120,13 @@ def augment_batch(
 
     key = rng
 
-    for TransformClass in transforms:
-        transform = getattr(transforms_lib, TransformClass)()
-        if isinstance(transform, grain.RandomMapTransform):
+    for transform_name in transforms:
+        transform = getattr(transforms_lib, transform_name)()
+        if hasattr(transform, "random_map"):
             key, subkey = random.split(key)
             batch = transform.random_map(batch, subkey)
-        elif isinstance(transform, grain.MapTransform):
+        elif hasattr(transform, "map"):
             batch = transform.map(batch)
-        elif hasattr(transform, "np_random_map"):  # TfRandomMapTransform
-            key, subkey = random.split(key)
-            batch = transform.np_random_map(batch, subkey)
         else:
             raise ValueError(f"Unknown operation type: {type(transform)}")
 
@@ -151,6 +154,125 @@ def get_logger(level="DEBUG"):
 
 
 logger = get_logger()
+
+
+class MetricWriter:
+    """The small slice of ``clu.metric_writers`` that this script uses.
+
+    ``clu.metric_writers`` imports TensorFlow unconditionally, and TensorFlow's
+    native runtime segfaults when it is loaded into the same process as grain's
+    (grain hard-imports ``array_record``, which links its own copy). tensorboardX
+    writes the same event files without TensorFlow.
+    """
+
+    def __init__(self, logdir: str, just_logging: bool = False):
+        self._writer = None if just_logging else SummaryWriter(logdir)
+
+    def write_scalars(self, step: int, scalars: Mapping[str, float]):
+        for key, value in scalars.items():
+            logger.info(f"[{step}] {key} = {value}")
+            if self._writer is not None:
+                self._writer.add_scalar(key, float(value), step)
+
+    def write_audios(
+        self, step: int, audios: Mapping[str, np.ndarray], sample_rate: int
+    ):
+        if self._writer is None:
+            return
+        for key, value in audios.items():
+            # clu's convention: (batch, time, channels), each item logged separately.
+            for i, audio in enumerate(value):
+                self._writer.add_audio(
+                    f"{key}/{i}", audio[:, 0], step, sample_rate=sample_rate
+                )
+
+    def flush(self):
+        if self._writer is not None:
+            self._writer.flush()
+
+    def close(self):
+        if self._writer is not None:
+            self._writer.close()
+
+
+@contextlib.contextmanager
+def ensure_flushes(writer: MetricWriter):
+    try:
+        yield writer
+    finally:
+        writer.flush()
+
+
+class ReportProgress:
+    """A stand-in for ``clu.periodic_actions.ReportProgress``.
+
+    ``clu.periodic_actions`` imports ``clu.metric_writers`` at module level, so it
+    drags in TensorFlow for the same reason :class:`MetricWriter` avoids it.
+    Reports steps/sec and a breakdown of the time spent in each ``timed`` block.
+    """
+
+    def __init__(
+        self,
+        num_train_steps: int = None,
+        writer: MetricWriter = None,
+        every_steps: int = None,
+        every_secs: float = 60.0,
+    ):
+        self._num_train_steps = num_train_steps
+        self._writer = writer
+        self._every_steps = every_steps
+        self._every_secs = every_secs
+        self._time_per_part = collections.defaultdict(float)
+        self._t0 = time.monotonic()
+        self._previous_step = None
+        self._previous_time = self._t0
+
+    def _should_trigger(self, step: int, t: float) -> bool:
+        if self._previous_step is None or step == self._previous_step:
+            return False
+        if self._every_steps is not None and step % self._every_steps == 0:
+            return True
+        if self._every_secs is not None and t - self._previous_time >= self._every_secs:
+            return True
+        return step == self._num_train_steps
+
+    def __call__(self, step: int):
+        t = time.monotonic()
+        if self._previous_step is None:
+            self._previous_step, self._previous_time = step, t
+            return
+        if not self._should_trigger(step, t):
+            return
+
+        steps_per_sec = (step - self._previous_step) / max(t - self._previous_time, 1e-9)
+        uptime = t - self._t0
+        message = f"{steps_per_sec:.1f} steps/s"
+        if self._num_train_steps:
+            message += f", {100 * step / self._num_train_steps:.1f}% ({step}/{self._num_train_steps})"
+        if self._time_per_part:
+            message += " ({})".format(
+                ", ".join(
+                    f"{100 * dt / uptime:.1f}% {name}"
+                    for name, dt in sorted(self._time_per_part.items())
+                )
+            )
+        logger.info(message)
+        if self._writer is not None:
+            self._writer.write_scalars(
+                step, {"steps_per_sec": steps_per_sec, "uptime": uptime}
+            )
+        self._previous_step, self._previous_time = step, t
+
+    @contextlib.contextmanager
+    def timed(self, name: str, wait_jax_async_dispatch: bool = True):
+        """Measures time spent in a named part of the training loop."""
+        t0 = time.monotonic()
+        try:
+            yield
+        finally:
+            if wait_jax_async_dispatch:
+                jax.block_until_ready(jnp.zeros(()))
+            self._time_per_part[name] += time.monotonic() - t0
 
 
 def is_process_main():
@@ -235,7 +357,7 @@ def create_generator(
         params = variables["params"]
     else:
         params = model.init(
-            {"params": subkey1, "rng_stream": subkey2}, batch.audio_data
+            {"params": subkey1, "rng_stream": subkey2}, batch.waveform
         )["params"]
 
     if tabulate:
@@ -243,7 +365,7 @@ def create_generator(
         print(
             model.tabulate(
                 {"params": subkey1, "rng_stream": subkey2},
-                batch.audio_data,
+                batch.waveform,
                 depth=3,
                 compute_flops=True,
                 compute_vjp_flops=True,
@@ -301,14 +423,14 @@ def create_discriminator(
     model = Discriminator()
 
     key, subkey = random.split(key)
-    params = model.init(subkey, batch.audio_data)["params"]
+    params = model.init(subkey, batch.waveform)["params"]
 
     if tabulate:
         key, subkey = random.split(key)
         print(
             model.tabulate(
                 subkey,
-                batch.audio_data,
+                batch.waveform,
                 depth=3,
                 compute_flops=True,
                 compute_vjp_flops=True,
@@ -340,7 +462,7 @@ def eval_step(
 
     assert lambdas is not None
 
-    audio_data = audio_tree.audio_data
+    audio_data = audio_tree.waveform
 
     audio_data = rearrange(audio_data, "b c t -> (b c) 1 t", c=1)
 
@@ -483,7 +605,7 @@ def train_step(
 
     audio_tree = augment_batch(subkey, audio_tree)
 
-    audio_data = audio_tree.audio_data
+    audio_data = audio_tree.waveform
     audio_data = rearrange(audio_data, "b c t -> (b c) 1 t", c=1)
 
     key, subkey = random.split(key)
@@ -526,7 +648,7 @@ def generate_step(
     rng: jax.Array, generator: TrainState, audio_tree: AudioTree, sample_rate: int
 ):
     """Encode and reconstruct audio."""
-    audio_data = audio_tree.audio_data
+    audio_data = audio_tree.waveform
     batch_size = audio_data.shape[0]
     audio_data = rearrange(audio_data, "b c t -> (b c) 1 t", c=1)
 
@@ -565,7 +687,7 @@ def reduce_metrics(metrics: list[Collection]):
 def log_training(
     train_metrics: List[TrainMetrics],
     step: int,
-    writer: metric_writers.MultiWriter,
+    writer: MetricWriter,
     log_every_steps=1,
 ):
     if log_every_steps and (step % log_every_steps == 0):
@@ -584,7 +706,7 @@ def log_training(
 
 
 def log_eval(
-    eval_metrics: List[EvalMetrics], step: int, writer: metric_writers.MultiWriter
+    eval_metrics: List[EvalMetrics], step: int, writer: MetricWriter
 ):
     eval_metrics = common_utils.stack_forest(eval_metrics).reduce()
 
@@ -637,9 +759,7 @@ def train(
 
     orbax_dir = os.path.join(workdir, "orbax")
 
-    writer = metric_writers.create_default_writer(
-        logdir=workdir, just_logging=not is_process_main()
-    )
+    writer = MetricWriter(logdir=workdir, just_logging=not is_process_main())
 
     if is_process_main():
         argbind.dump_args(args, os.path.join(workdir, "argbind_args.yml"))
@@ -658,7 +778,7 @@ def train(
             create_dataset(batch_size=batch_size, train=True, num_steps=num_iterations)
         )
 
-    with argbind.scope(args, "sample"):
+    with argbind.scope(args, "gen"):
         num_epochs = None  # so that it can iterate forever.
         sample_iter = iter(
             create_dataset(batch_size=sample_batch_size, num_epochs=num_epochs)
@@ -732,7 +852,7 @@ def train(
         del variables
 
     hooks = []
-    report_progress = periodic_actions.ReportProgress(
+    report_progress = ReportProgress(
         num_train_steps=num_iterations,
         every_secs=None,
         every_steps=10,
@@ -759,7 +879,7 @@ def train(
     jit_train_step = jax.jit(
         shard_map(
             bound_train_step,
-            mesh,
+            mesh=mesh,
             in_specs=(rep_spec, rep_spec, rep_spec, dp_spec, None),
             out_specs=(rep_spec, rep_spec, rep_spec),
         ),
@@ -777,7 +897,7 @@ def train(
     jit_eval_step = jax.jit(
         shard_map(
             bound_eval_step,
-            mesh,
+            mesh=mesh,
             in_specs=(rep_spec, rep_spec, rep_spec, dp_spec),
             out_specs=rep_spec,
         ),
@@ -787,7 +907,7 @@ def train(
     jit_generate_step = jax.jit(
         shard_map(
             generate_step,
-            mesh,
+            mesh=mesh,
             in_specs=(rep_spec, rep_spec, dp_spec, None),
             out_specs=dp_spec,
         ),
@@ -796,7 +916,7 @@ def train(
         static_argnums=3,
     )
 
-    with metric_writers.ensure_flushes(writer):
+    with ensure_flushes(writer):
         for step in range(1, num_iterations + 1):
 
             if step != 1:
@@ -839,7 +959,7 @@ def train(
                         )
                         recons = jax.device_get(recons)
                         save_batch = jax.device_get(save_batch)
-                        signal = rearrange(save_batch.audio_data, "b c t -> b t c", c=1)
+                        signal = rearrange(save_batch.waveform, "b c t -> b t c", c=1)
                         assert recons.ndim == 3
                         all_signal.append(np.array(signal))
                         all_recons.append(np.array(recons))

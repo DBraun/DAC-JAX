@@ -1,5 +1,4 @@
 import os.path
-from pathlib import Path
 import tempfile
 
 import jax.numpy as jnp
@@ -15,8 +14,9 @@ def test_binding():
     model = model.bind(variables)
 
     # Load audio file
-    filepath = Path(__file__).parent / "assets" / "60013__qubodup__whoosh.flac"
-    signal, sample_rate = librosa.load(filepath, sr=44100, mono=True, duration=0.5)
+    signal, sample_rate = librosa.load(
+        librosa.example("brahms"), sr=44100, mono=True, offset=35.0, duration=0.5
+    )
 
     signal = jnp.array(signal, dtype=jnp.float32)
     while signal.ndim < 3:

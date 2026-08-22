@@ -1,0 +1,44 @@
+$include:
+  - conf/base.yml
+
+# A deliberately tiny model. This exists so that tests/test_train.py can run a
+# couple of real training steps -- data pipeline, augmentation, generator and
+# discriminator updates, evaluation, sampling and checkpointing -- in seconds on
+# CPU. It is not a useful codec.
+
+DAC.sample_rate: 16000
+DAC.encoder_dim: 8
+DAC.encoder_rates: [2, 4, 5, 8]
+# The decoder halves its width per rate, so decoder_dim must stay >= 2**len(rates).
+DAC.decoder_dim: 32
+DAC.decoder_rates: [8, 5, 4, 2]
+
+DAC.num_codebooks: 2
+DAC.codebook_size: 16
+DAC.codebook_dim: 2
+DAC.quantizer_dropout: 0.5
+
+Discriminator.sample_rate: 16000
+Discriminator.rates: []
+Discriminator.periods: [2, 3]
+Discriminator.fft_sizes: [256]
+Discriminator.bands:
+  - [0.0, 0.5]
+  - [0.5, 1.0]
+
+train.num_iterations: 2
+train.valid_freq: 1
+train.sample_freq: 1
+train.batch_size: 1
+train.val_batch_size: 1
+train.sample_batch_size: 1
+train.ckpt_max_keep: 1
+train.enable_async_checkpointing: 0
+train.tabulate: 0
+
+train/create_dataset.duration: 0.38
+val/create_dataset.duration: 0.38
+gen/create_dataset.duration: 0.38
+test/create_dataset.duration: 0.38
+
+val/create_dataset.num_steps: 1

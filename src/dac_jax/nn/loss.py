@@ -393,10 +393,15 @@ def phase_loss(
     def phase(spec):
         return jnp.angle(spec)
 
-    # Take circular difference
+    # Take circular difference.
+    #
+    # This deliberately differs from the audiotools implementation linked above,
+    # which reads `diff[diff > np.pi] -= -2 * np.pi` and so adds 2*pi where it
+    # means to subtract it, leaving those entries further outside [-pi, pi] than
+    # they started. Wrapping properly is what the surrounding code assumes.
     diff = phase(x_stft) - phase(y_stft)
-    diff = diff.at[diff < -jnp.pi].set(diff[diff < -jnp.pi] + 2 * jnp.pi)
-    diff = diff.at[diff > jnp.pi].set(diff[diff > jnp.pi - 2 * jnp.pi])
+    diff = jnp.where(diff < -jnp.pi, diff + 2 * jnp.pi, diff)
+    diff = jnp.where(diff > jnp.pi, diff - 2 * jnp.pi, diff)
 
     # Scale true magnitude to weights in [0, 1]
     x_mag = jnp.abs(x_stft)
@@ -460,7 +465,7 @@ def stoi(
     for reference, estimate in zip(references, estimates):
         _stoi = pystoi.stoi(
             np.array(reference),
-            np.array(estimates),
+            np.array(estimate),
             sample_rate,
             extended=extended,
         )
@@ -512,7 +517,9 @@ def pesq(
     pesqs = []
     for reference, estimate in zip(references, estimates):
         _pesq = pesq_fn(
-            estimates_sample_rate,
+            # Both signals were just resampled to target_sr, so that -- not the
+            # rate they arrived at -- is the rate pesq must be told about.
+            target_sr,
             np.array(reference[0]),
             np.array(estimate[0]),
             mode,

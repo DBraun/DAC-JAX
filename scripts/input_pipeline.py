@@ -1,18 +1,17 @@
 from typing import List, Mapping
 
 import argbind
-from audiotree import SaliencyParams
-from audiotree.datasources import (
-    AudioDataSimpleSource,
-    AudioDataBalancedSource,
+from audiotree import AudioTree, ExcerptConfig
+from audiotree.sources import (
+    create_audio_dataset,
+    create_balanced_audio_dataset,
 )
-from audiotree.transforms import ReduceBatchTransform
-from grain import python as grain
+import grain
 
-SaliencyParams = argbind.bind(SaliencyParams, "train", "val", "test", "sample")
+ExcerptConfig = argbind.bind(ExcerptConfig, "train", "val", "test", "gen")
 
 
-@argbind.bind("train", "val", "test", "sample")
+@argbind.bind("train", "val", "test", "gen")
 def create_dataset(
     batch_size: int,
     sample_rate: int,
@@ -31,53 +30,56 @@ def create_dataset(
 
     assert sources is not None
 
+    common_kwargs = dict(
+        sample_rate=sample_rate,
+        mono=bool(mono),
+        duration=duration,
+        extensions=extensions,
+        excerpt=ExcerptConfig(),  # rely on argbind
+        num_epochs=num_epochs,
+        shuffle_seed=seed,
+    )
+
     if train:
         assert num_steps is not None and num_steps > 0
-        datasource = AudioDataBalancedSource(
+        dataset = create_balanced_audio_dataset(
             sources=sources,
-            num_records=num_steps * batch_size,
-            sample_rate=sample_rate,
-            mono=mono,
-            duration=duration,
-            extensions=extensions,
-            saliency_params=SaliencyParams(),  # rely on argbind,
+            shuffle=True,
+            **common_kwargs,
         )
+        # `num_records` is gone in audiotree 1.0; take the same number of items
+        # off the front of the (repeating) balanced dataset instead.
+        dataset = dataset[: num_steps * batch_size]
     else:
-        datasource = AudioDataSimpleSource(
-            sources=sources,
-            num_records=num_steps * batch_size if num_steps is not None else None,
-            sample_rate=sample_rate,
-            mono=mono,
-            duration=duration,
-            extensions=extensions,
+        # `create_audio_dataset` takes a flat list of directories rather than a
+        # mapping of groups: every file is weighted equally, which is what the
+        # old AudioDataSimpleSource did with a mapping.
+        folders = [folder for group in sources.values() for folder in group]
+        dataset = create_audio_dataset(
+            sources=folders,
+            shuffle=False,
+            **common_kwargs,
+        )
+        if num_steps is not None:
+            dataset = dataset[: num_steps * batch_size]
+
+    # Reads stay synchronous inside each worker; the workers are the parallelism.
+    read_options = grain.ReadOptions(num_threads=0, prefetch_buffer_size=0)
+
+    dataset = dataset.to_iter_dataset(read_options=read_options).batch(
+        batch_size, drop_remainder=True, batch_fn=AudioTree.batch
+    )
+
+    if worker_count:
+        dataset = dataset.mp_prefetch(
+            grain.MultiprocessingOptions(
+                num_workers=worker_count,
+                per_worker_buffer_size=worker_buffer_size,
+                enable_profiling=bool(enable_profiling),
+            )
         )
 
-    shard_options = grain.NoSharding()  # todo:
-
-    index_sampler = grain.IndexSampler(
-        num_records=len(datasource),
-        num_epochs=num_epochs,
-        shard_options=shard_options,
-        shuffle=bool(train),
-        seed=seed,
-    )
-
-    pygrain_ops = [
-        grain.Batch(batch_size=batch_size, drop_remainder=True),
-        ReduceBatchTransform(),
-    ]
-
-    dataloader = grain.DataLoader(
-        data_source=datasource,
-        sampler=index_sampler,
-        operations=pygrain_ops,
-        worker_count=worker_count,
-        worker_buffer_size=worker_buffer_size,
-        shard_options=shard_options,
-        enable_profiling=bool(enable_profiling),
-    )
-
-    return dataloader
+    return dataset
 
 
 if __name__ == "__main__":
@@ -109,7 +111,6 @@ if __name__ == "__main__":
         extensions=None,
         worker_count=0,
         worker_buffer_size=1,
-        saliency_params=SaliencyParams(False, 8, -70),
     )
 
     for x in tqdm(ds, total=num_steps, desc="Grain Dataset"):

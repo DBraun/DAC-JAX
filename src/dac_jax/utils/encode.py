@@ -16,7 +16,6 @@ warnings.filterwarnings(
 )  # ignore librosa warnings related to mel bins
 
 
-@jax.jit
 @argbind.bind(group="encode", positional=True, without_prefix=True)
 def encode(
     input: str,
@@ -57,6 +56,9 @@ def encode(
         model_bitrate=model_bitrate,
         tag=model_tag,
         load_path=weights_path,
+        # compress()/decompress() are unconditionally chunked, and the "chunk"
+        # methods assert that padding is off.
+        padding=False,
     )
 
     # Find all audio files in input path

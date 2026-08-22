@@ -2,6 +2,8 @@ import warnings
 from pathlib import Path
 
 import argbind
+import numpy as np
+import soundfile
 from tqdm import tqdm
 
 import jax
@@ -15,7 +17,6 @@ warnings.filterwarnings(
 )  # ignore librosa warnings related to mel bins
 
 
-@jax.jit
 @argbind.bind(group="decode", positional=True, without_prefix=True)
 def decode(
     input: str,
@@ -51,6 +52,9 @@ def decode(
         model_bitrate=model_bitrate,
         tag=model_tag,
         load_path=weights_path,
+        # compress()/decompress() are unconditionally chunked, and the "chunk"
+        # methods assert that padding is off.
+        padding=False,
     )
 
     # Find all .dac files in input directory
@@ -86,8 +90,13 @@ def decode(
         output_path = output_dir / output_name
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write to file
-        recons.write(output_path)
+        # Write to file. `decompress` returns a (batch, channels, samples) array,
+        # and soundfile wants (frames, channels).
+        soundfile.write(
+            output_path,
+            np.asarray(recons[0]).T,
+            samplerate=dac_file.sample_rate,
+        )
 
 
 if __name__ == "__main__":
