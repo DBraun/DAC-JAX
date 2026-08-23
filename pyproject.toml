@@ -65,6 +65,10 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
+    # PyTorch reference for MusicGen's compression model, via
+    # `facebook/encodec_32khz`. audiocraft, which tests/test_encodec_equivalence.py
+    # used to rely on, cannot be installed on Python 3.12.
+    "transformers",
 ]
 
 [project.urls]

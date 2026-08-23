@@ -136,9 +136,15 @@ are chosen. The renames a config needs are listed under *Changed* below.
   `assets/`, and set torch-DAC key names (`build_dataset.folders`,
   `AudioDataset.n_examples`) that this project does not use. It has been rewritten around
   `conf/mini.yml`.
-* `tests/test_encodec_equivalence.py` failed collection with a `ModuleNotFoundError` for
-  `audiocraft`, which 57359e1 removed as a dependency. It now skips when audiocraft is
-  absent.
+* **`tests/test_encodec_equivalence.py` now runs.** It failed collection with a
+  `ModuleNotFoundError` for `audiocraft`, which 57359e1 dropped as a dependency, and
+  audiocraft cannot be reinstated -- it pins `torch==2.1.0` and `torchtext==0.16.0`, so it
+  will not install on Python 3.12. The PyTorch reference is now `transformers`'
+  `EncodecModel` loading `facebook/encodec_32khz`, which is MusicGen's compression model
+  published on its own; it also drops the hard-coded `.cuda()`, so the test runs on CPU in
+  about 15 seconds. Codes come out bit-identical and the reconstruction agrees to ~1.8e-7,
+  so the `atol` is tightened from 1e-4 to 1e-5, closing the TODO that asked for it. The
+  input is also read at the model's own 32 kHz rather than 44.1 kHz.
 * **`stoi` passed the whole batch as the estimate.** Inside its per-item loop it handed
   `estimates` rather than `estimate` to `pystoi`, so it compared each reference against
   the entire batch array and raised on any input it could not broadcast.

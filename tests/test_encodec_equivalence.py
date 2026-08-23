@@ -8,12 +8,6 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 from functools import partial
 
-import pytest
-
-# The torch reference path still needs audiocraft, which 57359e1 dropped as a
-# dependency of the library itself (dac_jax loads the checkpoint straight from
-# the Hub now). Skip rather than fail collection when it is not installed.
-MusicGen = pytest.importorskip("audiocraft.models").MusicGen
 import jax
 from jax import numpy as jnp
 from jax import random
@@ -79,13 +73,23 @@ def run_jax_model2(np_data):
 
 
 def run_torch_model(np_data):
-    model = MusicGen.get_pretrained("facebook/musicgen-small")
-    x = torch.from_numpy(np_data).cuda()
-    result = model.compression_model(x)
+    """PyTorch reference for MusicGen's compression model.
 
-    recons = result.x.detach().cpu().numpy()
-    codes = result.codes.detach().cpu().numpy()
-    assert codes.shape[1] == model.compression_model.num_codebooks
+    `facebook/encodec_32khz` is that same model published on its own, so this
+    needs neither audiocraft (unusable on Python 3.12: it pins torch==2.1.0 and
+    torchtext==0.16.0) nor a GPU.
+    """
+    from transformers import EncodecModel
+
+    model = EncodecModel.from_pretrained("facebook/encodec_32khz").eval()
+
+    with torch.no_grad():
+        encoded = model.encode(torch.from_numpy(np_data))
+        decoded = model.decode(encoded.audio_codes, encoded.audio_scales)
+
+    codes = encoded.audio_codes[0].numpy()
+    recons = decoded.audio_values.numpy()
+    assert codes.shape[1] == model.config.num_quantizers
 
     return recons, codes
 
@@ -96,7 +100,7 @@ def test_encoded_equivalence():
     # entries can round differently in JAX than in Torch and cascade through the
     # remaining codebooks. This segment has no such near-tie.
     np_data, sr = librosa.load(
-        librosa.example("brahms"), sr=44100, mono=True, offset=35.0, duration=0.5
+        librosa.example("brahms"), sr=32000, mono=True, offset=35.0, duration=0.5
     )
     np_data = np.expand_dims(np.array(np_data), 0)
     np_data = np.expand_dims(np.array(np_data), 0)
@@ -108,12 +112,12 @@ def test_encoded_equivalence():
     jax_recons, jax_codes = run_jax_model1(np_data)
 
     assert np.allclose(torch_codes, jax_codes)
-    assert np.allclose(torch_recons, jax_recons, atol=1e-4)  # todo: reduce atol to 1e-5
+    assert np.allclose(torch_recons, jax_recons, atol=1e-5)
 
     jax_recons, jax_codes = run_jax_model2(np_data)
 
     assert np.allclose(torch_codes, jax_codes)
-    assert np.allclose(torch_recons, jax_recons, atol=1e-4)  # todo: reduce atol to 1e-5
+    assert np.allclose(torch_recons, jax_recons, atol=1e-5)
 
 
 if __name__ == "__main__":
