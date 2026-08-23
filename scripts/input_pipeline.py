@@ -36,7 +36,6 @@ def create_dataset(
         duration=duration,
         extensions=extensions,
         excerpt=ExcerptConfig(),  # rely on argbind
-        num_epochs=num_epochs,
         shuffle_seed=seed,
     )
 
@@ -45,10 +44,15 @@ def create_dataset(
         dataset = create_balanced_audio_dataset(
             sources=sources,
             shuffle=True,
+            # Repeat without bound, so that the slice below is what fixes the
+            # length. audiotree 1.0 dropped `num_records`, which the balanced
+            # source used to take for exactly this, and which was likewise not
+            # capped by how many files the corpus happens to hold: a training run
+            # asks for `num_steps` batches whether that is a fraction of an epoch
+            # or many epochs' worth.
+            num_epochs=None,
             **common_kwargs,
         )
-        # `num_records` is gone in audiotree 1.0; take the same number of items
-        # off the front of the (repeating) balanced dataset instead.
         dataset = dataset[: num_steps * batch_size]
     else:
         # `create_audio_dataset` takes a flat list of directories rather than a
@@ -58,6 +62,7 @@ def create_dataset(
         dataset = create_audio_dataset(
             sources=folders,
             shuffle=False,
+            num_epochs=num_epochs,
             **common_kwargs,
         )
         if num_steps is not None:
