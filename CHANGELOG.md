@@ -92,7 +92,10 @@ are chosen. The renames a config needs are listed under *Changed* below.
   now declared, having always been imported directly.
 * `jax.experimental.shard_map` is now `jax.shard_map`, whose `mesh` argument is
   keyword-only.
-* README installation and testing instructions are written for `uv`.
+* README installation and testing instructions are written for `uv`. Its limitations
+  list no longer claims `audio_utils.py` uses dm_aux's STFT "instead of
+  `jax.scipy.signal.stft`" -- librosax wraps that very function -- and the testing
+  section describes both PyTorch parity tests rather than the audiocraft skip.
 
 ### Removed
 

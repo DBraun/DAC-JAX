@@ -279,9 +279,13 @@ tensorboard --logdir="/tmp/dac_jax_runs"
 uv run pytest tests
 ```
 
-`tests/test_encodec_equivalence.py` compares against the PyTorch EnCodec inside
-[audiocraft](https://github.com/facebookresearch/audiocraft), which is not a
-dependency of this project; it skips itself when audiocraft is not installed.
+Both PyTorch parity tests run by default and need no GPU. `test_dac_equivalence.py`
+compares against [descript-audio-codec](https://github.com/descriptinc/descript-audio-codec),
+and `test_encodec_equivalence.py` compares against `facebook/encodec_32khz` through
+`transformers` -- that is MusicGen's compression model published on its own, so it
+exercises the same weights without needing
+[audiocraft](https://github.com/facebookresearch/audiocraft), which cannot be installed
+on Python 3.12. Both are installed by the `dev` extra.
 
 ## Limitations
 
@@ -290,7 +294,6 @@ Pull requests—especially ones which address any of the limitations below—are
 * We implement the "chunked" `compress`/`decompress` methods from the PyTorch repository, although this technique has some problems outlined [here](https://github.com/descriptinc/descript-audio-codec/issues/39).
 * We have not run all evaluation scripts in the `scripts` directory. For some of them, it makes sense to just keep using PyTorch instead of JAX.
 * The model architecture code (`model/dac.py`) has many static methods to help with finding DAC's `delay` and `output_length`. Please help us refactor this so that code is not so duplicated and at risk of typos.
-* In `audio_utils.py` we use [DM_AUX's](https://github.com/google-deepmind/dm_aux) STFT function instead of `jax.scipy.signal.stft`. We believe this is faster but requires more memory.
 * The source code of DAC-JAX has some `todo:` markings which indicate (mostly minor) improvements we'd like to have.
 * We don't have a Docker image yet like the original [DAC repository](https://github.com/descriptinc/descript-audio-codec) does.
 * Please check the limitations of [argbind-dbraun](https://github.com/DBraun/argbind?tab=readme-ov-file#limitations-and-known-issues), the fork of argbind that this project uses.
