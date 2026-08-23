@@ -46,8 +46,12 @@ def disc_outputs():
     rng = np.random.default_rng(1)
     fake, real = [], []
     for n_maps in (6, 6, 6, 6, 6, 26, 26, 26):
-        fake.append([rng.standard_normal((2, 4, 16)).astype(np.float32) for _ in range(n_maps)])
-        real.append([rng.standard_normal((2, 4, 16)).astype(np.float32) for _ in range(n_maps)])
+        fake.append(
+            [rng.standard_normal((2, 4, 16)).astype(np.float32) for _ in range(n_maps)]
+        )
+        real.append(
+            [rng.standard_normal((2, 4, 16)).astype(np.float32) for _ in range(n_maps)]
+        )
     return fake, real
 
 
@@ -73,8 +77,9 @@ def test_sisdr_loss_same_as_dac_torch(signals):
     a, b = signals
     jax_v = float(sisdr_loss(jnp.asarray(a), jnp.asarray(b)))
     torch_v = float(
-        dac_loss.SISDRLoss()(AudioSignal(torch.from_numpy(b), SR),
-                             AudioSignal(torch.from_numpy(a), SR))
+        dac_loss.SISDRLoss()(
+            AudioSignal(torch.from_numpy(b), SR), AudioSignal(torch.from_numpy(a), SR)
+        )
     )
     assert np.allclose(jax_v, torch_v, rtol=RTOL)
 
@@ -118,18 +123,21 @@ def _speech():
         librosa.example("brahms"), sr=SR, mono=True, offset=35.0, duration=2.0
     )
     clean = clean[None, None, :].astype(np.float32)
-    noisy = (clean + 0.02 * np.random.default_rng(0).standard_normal(clean.shape)).astype(
-        np.float32
-    )
+    noisy = (
+        clean + 0.02 * np.random.default_rng(0).standard_normal(clean.shape)
+    ).astype(np.float32)
     return clean, noisy
 
 
 def test_stoi_same_as_audiotools():
     clean, noisy = _speech()
-    jax_v = float(np.ravel(np.asarray(stoi(jnp.asarray(noisy), jnp.asarray(clean), SR)))[0])
+    jax_v = float(
+        np.ravel(np.asarray(stoi(jnp.asarray(noisy), jnp.asarray(clean), SR)))[0]
+    )
     torch_v = float(
         at_metrics.quality.stoi(
-            AudioSignal(torch.from_numpy(noisy), SR), AudioSignal(torch.from_numpy(clean), SR)
+            AudioSignal(torch.from_numpy(noisy), SR),
+            AudioSignal(torch.from_numpy(clean), SR),
         )[0]
     )
     assert np.allclose(jax_v, torch_v, rtol=RTOL)
@@ -142,7 +150,8 @@ def test_pesq_same_as_audiotools():
     )
     torch_v = float(
         at_metrics.quality.pesq(
-            AudioSignal(torch.from_numpy(noisy), SR), AudioSignal(torch.from_numpy(clean), SR)
+            AudioSignal(torch.from_numpy(noisy), SR),
+            AudioSignal(torch.from_numpy(clean), SR),
         )[0]
     )
     assert np.allclose(jax_v, torch_v, rtol=RTOL)

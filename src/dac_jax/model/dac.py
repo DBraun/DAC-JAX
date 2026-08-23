@@ -70,7 +70,6 @@ class DACFile:
 
 
 class ResidualUnit(nn.Module):
-
     dim: int = 16
     dilation: int = 1
     padding: int = 1
@@ -113,7 +112,6 @@ class ResidualUnit(nn.Module):
 
 
 class EncoderBlock(nn.Module):
-
     dim: int = 16
     stride: int = 1
     padding: int = 1
@@ -157,7 +155,6 @@ class EncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-
     d_model: int = 64
     strides: list = field(default_factory=lambda: [2, 4, 8, 8])
     d_latent: int = 64
@@ -261,7 +258,6 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
-
     input_channel: int
     channels: int
     rates: List[int]
@@ -328,7 +324,6 @@ class Decoder(nn.Module):
 
 
 class DAC(CompressionModel):
-
     encoder_dim: int = 64
     encoder_rates: tuple = field(default_factory=lambda: [2, 4, 8, 8])
     latent_dim: int = None
@@ -339,9 +334,7 @@ class DAC(CompressionModel):
     codebook_dim: Union[int, list] = 8
     quantizer_dropout: float = 0.0
     sample_rate: int = 44100
-    padding: int = (
-        1  # https://github.com/pseeth/argbind?tab=readme-ov-file#boolean-keyword-arguments
-    )
+    padding: int = 1  # https://github.com/pseeth/argbind?tab=readme-ov-file#boolean-keyword-arguments
 
     def __post_init__(self) -> None:
         if self.latent_dim is None:
@@ -420,9 +413,9 @@ class DAC(CompressionModel):
 
     def preprocess(self, audio_data, sample_rate):
         if sample_rate:
-            assert (
-                sample_rate == self.sample_rate
-            ), f"Expected sample rate is {self.sample_rate}"
+            assert sample_rate == self.sample_rate, (
+                f"Expected sample rate is {self.sample_rate}"
+            )
 
         length = audio_data.shape[-1]
         right_pad = math.ceil(length / self.hop_length) * self.hop_length - length
@@ -477,9 +470,9 @@ class DAC(CompressionModel):
     def compress_chunk(
         self, audio_data: jnp.ndarray, n_quantizers: int = None
     ) -> jnp.ndarray:
-        assert (
-            not self.padding
-        ), 'Padding must be disabled in order to use a "chunk" method.'
+        assert not self.padding, (
+            'Padding must be disabled in order to use a "chunk" method.'
+        )
         audio_data = self.preprocess(audio_data, self.sample_rate)
 
         z = self.encoder(audio_data)
@@ -523,9 +516,9 @@ class DAC(CompressionModel):
         return out
 
     def decompress_chunk(self, codes):
-        assert (
-            not self.padding
-        ), 'Padding must be disabled in order to use a "chunk" method.'
+        assert not self.padding, (
+            'Padding must be disabled in order to use a "chunk" method.'
+        )
         r = self.decode(codes)
         return r
 
@@ -802,7 +795,6 @@ def receptive_field_test():
 
 
 if __name__ == "__main__":
-
     receptive_field_test()
 
     print("All Done!")

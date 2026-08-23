@@ -54,9 +54,9 @@ class SEANetResnetBlock(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        assert len(self.kernel_sizes) == len(
-            self.dilations
-        ), "Number of kernel sizes should match number of dilations"
+        assert len(self.kernel_sizes) == len(self.dilations), (
+            "Number of kernel sizes should match number of dilations"
+        )
         act = lambda y: getattr(nn.activation, self.activation)(
             y, **self.activation_params
         )

@@ -12,7 +12,12 @@ from audiotools.ml.decorators import Tracker
 import jax.numpy as jnp
 import numpy as np
 
-from dac_jax.nn.loss import multiscale_stft_loss, mel_spectrogram_loss, sisdr_loss, l1_loss
+from dac_jax.nn.loss import (
+    multiscale_stft_loss,
+    mel_spectrogram_loss,
+    sisdr_loss,
+    l1_loss,
+)
 
 
 @dataclass

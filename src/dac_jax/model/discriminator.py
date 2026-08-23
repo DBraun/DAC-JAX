@@ -11,7 +11,6 @@ from dac_jax.nn.layers import make_initializer
 
 
 class LeakyReLU(nn.Module):
-
     negative_slope: float = 0.01
 
     @nn.compact
@@ -20,7 +19,6 @@ class LeakyReLU(nn.Module):
 
 
 class WNConv(nn.Conv):
-
     act: bool = True
 
     @nn.compact
@@ -73,7 +71,6 @@ class WNConv(nn.Conv):
 
 
 class MPD(nn.Module):
-
     period: int
 
     def pad_to_period(self, x):
@@ -134,7 +131,6 @@ class MPD(nn.Module):
 
 
 class MSD(nn.Module):
-
     rate: int = 1
     sample_rate: int = 44100
 
@@ -191,7 +187,6 @@ BANDS = [(0.0, 0.1), (0.1, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)]
 
 
 class MRD(nn.Module):
-
     window_length: int
     hop_factor: float = 0.25
     sample_rate: int = 44100
@@ -301,7 +296,6 @@ class MRD(nn.Module):
 
 
 class Discriminator(nn.Module):
-
     rates: list = field(default_factory=lambda: [])
     periods: list = field(default_factory=lambda: [2, 3, 5, 7, 11])
     fft_sizes: list = field(default_factory=lambda: [2048, 1024, 512])

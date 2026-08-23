@@ -136,6 +136,7 @@ model, variables = dac_jax.load_model(model_type="44khz")
 # If you want to use pretrained 32 kHz EnCodec from Meta's MusicGen, use this:
 # model, variables = dac_jax.load_encodec_model()
 
+
 @jax.jit
 def encode_to_codes(x: jnp.ndarray):
     codes, scale = model.apply(
@@ -144,6 +145,7 @@ def encode_to_codes(x: jnp.ndarray):
         method="encode",
     )
     return codes, scale
+
 
 @partial(jax.jit, static_argnums=(1, 2))
 def decode_from_codes(codes: jnp.ndarray, scale, length: int = None):
@@ -156,8 +158,11 @@ def decode_from_codes(codes: jnp.ndarray, scale, length: int = None):
     )
     return recons
 
+
 # Load a mono audio file with the correct sample rate
-signal, sample_rate = librosa.load('input.wav', sr=model.sample_rate, mono=True, duration=.5)
+signal, sample_rate = librosa.load(
+    "input.wav", sr=model.sample_rate, mono=True, duration=0.5
+)
 
 signal = jnp.array(signal, dtype=jnp.float32)
 while signal.ndim < 3:
@@ -187,7 +192,7 @@ model, variables = dac_jax.load_model(model_type="44khz")
 model = model.bind(variables)
 
 # Load a mono audio file
-signal, sample_rate = librosa.load('input.wav', sr=44100, mono=True, duration=.5)
+signal, sample_rate = librosa.load("input.wav", sr=44100, mono=True, duration=0.5)
 
 signal = jnp.array(signal, dtype=jnp.float32)
 while signal.ndim < 3:
@@ -203,12 +208,12 @@ dac_file.save("dac_file_001.dac")
 # Load a file
 dac_file = DACFile.load("dac_file_001.dac")
 
-# Decode audio signal. Since we're passing a dac_file, this undoes the 
+# Decode audio signal. Since we're passing a dac_file, this undoes the
 # previous sample rate conversion and volume normalization.
 y = model.decode(dac_file)
 
 # Calculate mean-square error of reconstruction in time-domain
-mse = jnp.square(y-signal).mean()
+mse = jnp.square(y - signal).mean()
 ```
 
 ### DAC compression with constant GPU memory regardless of input length:
@@ -224,24 +229,29 @@ import librosa
 model, variables = dac_jax.load_model(model_type="44khz", padding=False)
 
 # Load a mono audio file at any sample rate
-signal, sample_rate = librosa.load('input.wav', sr=None, mono=True)
+signal, sample_rate = librosa.load("input.wav", sr=None, mono=True)
 
 signal = jnp.array(signal, dtype=jnp.float32)
 while signal.ndim < 3:
     # signal will eventually be shaped [B, C, T]
     signal = jnp.expand_dims(signal, axis=0)
 
+
 # Jit-compile these functions because they're used inside a loop over chunks.
 @jax.jit
 def compress_chunk(x):
-    return model.apply(variables, x, method='compress_chunk')
+    return model.apply(variables, x, method="compress_chunk")
+
 
 @jax.jit
 def decompress_chunk(c):
-    return model.apply(variables, c, method='decompress_chunk')
+    return model.apply(variables, c, method="decompress_chunk")
+
 
 win_duration = 0.5  # Adjust based on your GPU's memory size
-dac_file = model.compress(compress_chunk, signal, sample_rate, win_duration=win_duration)
+dac_file = model.compress(
+    compress_chunk, signal, sample_rate, win_duration=win_duration
+)
 
 # Save and load to and from disk
 dac_file.save("compressed.dac")

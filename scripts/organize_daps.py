@@ -63,7 +63,7 @@ def process(
 
     if dataset == "daps":
         get_split = assign(DAPS_VAL, DAPS_TEST)
-        get_value = lambda path: (str(path).split("/")[-1].split("_", maxsplit=4)[0])
+        get_value = lambda path: str(path).split("/")[-1].split("_", maxsplit=4)[0]
         audio_files = [
             x
             for x in util.find_audio(dataset_path)

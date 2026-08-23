@@ -197,12 +197,12 @@ def test_equivalence_padding():
             atol = 1e-5
         else:
             raise ValueError(f"Unexpected key '{key}'.")
-        assert (
-            jax_result[key].shape == torch_result[key].shape
-        ), f"key: {key}, torch: {torch_result[key].shape}, jax: {jax_result[key].shape}"
-        assert np.allclose(
-            jax_result[key], torch_result[key], atol=atol
-        ), f"Failed to match outputs for key: {key} and atol: {atol}"
+        assert jax_result[key].shape == torch_result[key].shape, (
+            f"key: {key}, torch: {torch_result[key].shape}, jax: {jax_result[key].shape}"
+        )
+        assert np.allclose(jax_result[key], torch_result[key], atol=atol), (
+            f"Failed to match outputs for key: {key} and atol: {atol}"
+        )
 
     jax_recons, jax_codes = _jax_padding_jit(np_data)
 

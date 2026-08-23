@@ -41,7 +41,7 @@ def main(
     for i in range(codes.shape[1]):
         codes_ = codes[0, i, :]
         counts = np.bincount(codes_)
-        counts = (counts / counts.sum())
+        counts = counts / counts.sum()
         counts = np.maximum(counts, 1e-10)
         entropy.append(-(counts * np.log(counts)).sum().item() * np.log2(np.e))
 

@@ -1,0 +1,10 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Keep in step with the `ruff` pin in pyproject.toml's dev extra.
+    rev: v0.16.4
+    hooks:
+      - id: ruff-format
+        # ruff 0.16 also formats Python code blocks inside Markdown, but the
+        # hook's default `types_or` leaves Markdown out. The README's examples
+        # are worth keeping formatted alongside the code they mirror.
+        types_or: [python, pyi, jupyter, markdown]

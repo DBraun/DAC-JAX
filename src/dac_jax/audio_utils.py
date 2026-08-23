@@ -68,9 +68,9 @@ def compute_stft_padding(
         Amount to pad on either side of audio.
     """
     if match_stride:
-        assert (
-            hop_length == window_length // 4
-        ), "For match_stride, hop must equal n_fft // 4"
+        assert hop_length == window_length // 4, (
+            "For match_stride, hop must equal n_fft // 4"
+        )
         right_pad = math.ceil(length / hop_length) * hop_length - length
         pad = (window_length - hop_length) // 2
     else:

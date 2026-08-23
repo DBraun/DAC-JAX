@@ -17,13 +17,13 @@ from dac_jax.nn.encodec_quantize import ResidualVectorQuantizer
 
 
 def get_audiocraft_cache_dir() -> tp.Optional[str]:
-    return os.environ.get('AUDIOCRAFT_CACHE_DIR', None)
+    return os.environ.get("AUDIOCRAFT_CACHE_DIR", None)
 
 
 def _get_state_dict(
     file_or_url_or_id: tp.Union[Path, str],
     filename: tp.Optional[str] = None,
-    device='cpu',
+    device="cpu",
     cache_dir: tp.Optional[str] = None,
 ):
     # Imported lazily: torch is only needed to read the pretrained Descript and
@@ -43,23 +43,38 @@ def _get_state_dict(
         file = f"{file_or_url_or_id}/{filename}"
         return torch.load(file, map_location=device)
 
-    elif file_or_url_or_id.startswith('https://'):
-        return torch.hub.load_state_dict_from_url(file_or_url_or_id, map_location=device, check_hash=True)
+    elif file_or_url_or_id.startswith("https://"):
+        return torch.hub.load_state_dict_from_url(
+            file_or_url_or_id, map_location=device, check_hash=True
+        )
 
     else:
-        assert filename is not None, "filename needs to be defined if using HF checkpoints"
+        assert filename is not None, (
+            "filename needs to be defined if using HF checkpoints"
+        )
 
         file = hf_hub_download(
-            repo_id=file_or_url_or_id, filename=filename, cache_dir=cache_dir,
-            library_name="audiocraft", library_version="1.3.0")
+            repo_id=file_or_url_or_id,
+            filename=filename,
+            cache_dir=cache_dir,
+            library_name="audiocraft",
+            library_version="1.3.0",
+        )
         return torch.load(file, map_location=device)
 
 
 try:
     from audiocraft.models.loaders import load_compression_model_ckpt
 except Exception as e:
-    def load_compression_model_ckpt(file_or_url_or_id: tp.Union[Path, str], cache_dir: tp.Optional[str] = None):
-        return _get_state_dict(file_or_url_or_id, filename="compression_state_dict.bin", cache_dir=cache_dir)
+
+    def load_compression_model_ckpt(
+        file_or_url_or_id: tp.Union[Path, str], cache_dir: tp.Optional[str] = None
+    ):
+        return _get_state_dict(
+            file_or_url_or_id,
+            filename="compression_state_dict.bin",
+            cache_dir=cache_dir,
+        )
 
 
 __MODEL_LATEST_TAGS__ = {

@@ -61,6 +61,7 @@ dev = [
     "encodec",
     "pandas",
     "pesq",
+    "pre-commit",
     "pytest",
     "pytest-cov",
     "ruff",
@@ -69,6 +70,12 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/DBraun/DAC-JAX"
 Repository = "https://github.com/DBraun/DAC-JAX"
+
+[tool.ruff]
+# Pinned so a future ruff release formats this repository the same way. These
+# are ruff's own defaults today, stated explicitly rather than inherited.
+line-length = 88
+target-version = "py312"
 
 [tool.setuptools.dynamic]
 version = { attr = "dac_jax.__version__" }

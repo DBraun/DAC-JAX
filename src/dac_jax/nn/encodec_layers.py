@@ -414,9 +414,9 @@ class StreamableConvTranspose1d(nn.Module):
     norm_kwargs: tp.Dict[str, tp.Any] = field(default_factory=lambda: {})
 
     def __post_init__(self):
-        assert (
-            self.causal or self.trim_right_ratio == 1.0
-        ), "`trim_right_ratio` != 1.0 only makes sense for causal convolutions"
+        assert self.causal or self.trim_right_ratio == 1.0, (
+            "`trim_right_ratio` != 1.0 only makes sense for causal convolutions"
+        )
         assert self.trim_right_ratio >= 0.0 and self.trim_right_ratio <= 1.0
         super().__post_init__()
 

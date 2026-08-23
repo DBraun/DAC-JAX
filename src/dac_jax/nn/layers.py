@@ -69,7 +69,6 @@ def make_initializer(in_channels, out_channels, kernel_size, groups, mode="fan_i
 
 
 class WNConv1d(nn.Conv):
-
     @nn.compact
     def __call__(self, x):
         # https://github.com/descriptinc/descript-audio-codec/blob/c7cfc5d2647e26471dc394f95846a0830e7bec34/dac/model/dac.py#L18-L21
@@ -117,7 +116,6 @@ class WNConv1d(nn.Conv):
 
 
 class WNConvTranspose1d(nn.ConvTranspose):
-
     @nn.compact
     def __call__(self, x):
 
@@ -179,7 +177,6 @@ class WNConvTranspose1d(nn.ConvTranspose):
 
 
 class Snake1d(nn.Module):
-
     channels: int
 
     @nn.compact

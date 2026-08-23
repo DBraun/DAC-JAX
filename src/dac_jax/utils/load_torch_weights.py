@@ -70,7 +70,7 @@ def torch_to_linen(
         parse_wn_convtranspose(d, f"{from_prefix}.block.1", 0)
 
         for i in range(3):
-            parse_residual_unit(d, f"{from_prefix}.block.{i+2}", i)
+            parse_residual_unit(d, f"{from_prefix}.block.{i + 2}", i)
 
         flax_params[f"DecoderBlock_{to_i}"] = d
 
@@ -82,7 +82,7 @@ def torch_to_linen(
 
     # add EncoderBlocks
     for _ in encoder_rates:
-        parse_encoder_block(flax_params["encoder"], f"encoder.block.{i+1}", i)
+        parse_encoder_block(flax_params["encoder"], f"encoder.block.{i + 1}", i)
         i += 1
 
     i += 1
@@ -129,7 +129,7 @@ def torch_to_linen(
 
     # Add DecoderBlocks
     for _ in decoder_rates:
-        parse_decoder_block(flax_params["decoder"], f"decoder.model.{i+1}", i)
+        parse_decoder_block(flax_params["decoder"], f"decoder.model.{i + 1}", i)
         i += 1
 
     i += 1

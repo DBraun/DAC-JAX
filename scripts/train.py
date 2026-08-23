@@ -244,7 +244,9 @@ class ReportProgress:
         if not self._should_trigger(step, t):
             return
 
-        steps_per_sec = (step - self._previous_step) / max(t - self._previous_time, 1e-9)
+        steps_per_sec = (step - self._previous_step) / max(
+            t - self._previous_time, 1e-9
+        )
         uptime = t - self._t0
         message = f"{steps_per_sec:.1f} steps/s"
         if self._num_train_steps:
@@ -356,9 +358,9 @@ def create_generator(
         _, variables = load_model(model_type="44khz", model_bitrate="8kbps")
         params = variables["params"]
     else:
-        params = model.init(
-            {"params": subkey1, "rng_stream": subkey2}, batch.waveform
-        )["params"]
+        params = model.init({"params": subkey1, "rng_stream": subkey2}, batch.waveform)[
+            "params"
+        ]
 
     if tabulate:
         subkey1, subkey2, key = random.split(key, 3)
@@ -705,9 +707,7 @@ def log_training(
     return train_metrics
 
 
-def log_eval(
-    eval_metrics: List[EvalMetrics], step: int, writer: MetricWriter
-):
+def log_eval(eval_metrics: List[EvalMetrics], step: int, writer: MetricWriter):
     eval_metrics = common_utils.stack_forest(eval_metrics).reduce()
 
     summary = {}
@@ -918,7 +918,6 @@ def train(
 
     with ensure_flushes(writer):
         for step in range(1, num_iterations + 1):
-
             if step != 1:
                 with report_progress.timed("load_train_batch"):
                     batch = next(train_iter)
