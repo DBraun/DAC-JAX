@@ -44,6 +44,7 @@ from audiotree import AudioTree
 from audiotree.transforms import jax as jax_transforms
 from clu.metrics import Average, Collection
 from einops import rearrange
+import grain
 from flax import struct
 from flax.training import common_utils
 from flax.training.early_stopping import EarlyStopping
@@ -93,10 +94,6 @@ dp_spec = jax.sharding.PartitionSpec("dp")
 rep_spec = jax.sharding.PartitionSpec()
 dp_sharding = jax.sharding.NamedSharding(mesh, dp_spec)
 rep_sharding = jax.sharding.NamedSharding(mesh, rep_spec)
-
-
-def shard_dp(x):
-    return jax.device_put(x, dp_sharding)
 
 
 def shard_replicated(x):
@@ -773,15 +770,30 @@ def train(
 
     create_dataset = partial(_create_dataset, sample_rate=SAMPLE_RATE)
 
+    def to_devices(dataset):
+        """Shard batches across the "dp" axis as part of the input pipeline.
+
+        `grain.experimental.device_put` keeps a CPU-side prefetch buffer and a
+        per-device one, so the host-to-device copy overlaps the step it feeds
+        rather than blocking on it the way a `jax.device_put` per batch does.
+        """
+        return grain.experimental.device_put(dataset, dp_sharding)
+
     with argbind.scope(args, "train"):
         train_iter = iter(
-            create_dataset(batch_size=batch_size, train=True, num_steps=num_iterations)
+            to_devices(
+                create_dataset(
+                    batch_size=batch_size, train=True, num_steps=num_iterations
+                )
+            )
         )
 
     with argbind.scope(args, "gen"):
         num_epochs = None  # so that it can iterate forever.
         sample_iter = iter(
-            create_dataset(batch_size=sample_batch_size, num_epochs=num_epochs)
+            to_devices(
+                create_dataset(batch_size=sample_batch_size, num_epochs=num_epochs)
+            )
         )
 
     def best_fn(eval_metrics_summary) -> float:
@@ -921,7 +933,6 @@ def train(
             if step != 1:
                 with report_progress.timed("load_train_batch"):
                     batch = next(train_iter)
-                    batch = shard_dp(batch)
 
             with report_progress.timed("train_step"):
                 if step == 1:
@@ -948,7 +959,6 @@ def train(
                     all_recons = []
                     for _ in range(2):  # todo: argbind the 2 parameter
                         save_batch = next(sample_iter)
-                        save_batch = shard_dp(save_batch)
                         key, subkey = random.split(key)
                         recons = jit_generate_step(
                             subkey,
@@ -979,7 +989,9 @@ def train(
                     eval_metrics_all = []
                     with argbind.scope(args, "val"):
                         if eval_dataset is None:
-                            eval_dataset = create_dataset(batch_size=val_batch_size)
+                            eval_dataset = to_devices(
+                                create_dataset(batch_size=val_batch_size)
+                            )
                     ran_once = False
                     for test_batch in iter(eval_dataset):
                         ran_once = True
@@ -988,7 +1000,7 @@ def train(
                             subkey,
                             generator_state,
                             discriminator_state,
-                            shard_dp(test_batch),
+                            test_batch,
                         )
                         eval_metrics_all.append(eval_metrics)
                     assert ran_once
